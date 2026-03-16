@@ -1,0 +1,146 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Instrument+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
+
+:root {
+  --bg-base: #0F1117;
+  --bg-surface: #1A1D27;
+  --bg-card: #1E2133;
+  --border: rgba(255,255,255,0.07);
+  --border-accent: rgba(255,255,255,0.12);
+  --text-primary: #F0EDE8;
+  --text-muted: #8B8FA8;
+  --text-subtle: #5A5F76;
+  --accent-teal: #2DD4BF;
+  --accent-teal-dim: rgba(45,212,191,0.12);
+  --accent-violet: #7C3AED;
+  --accent-violet-dim: rgba(124,58,237,0.12);
+  --accent-amber: #F59E0B;
+  --accent-amber-dim: rgba(245,158,11,0.12);
+  --accent-green: #10B981;
+  --accent-green-dim: rgba(16,185,129,0.12);
+  --accent-red: #EF4444;
+  --accent-red-dim: rgba(239,68,68,0.12);
+  --accent-blue: #3B82F6;
+  --accent-blue-dim: rgba(59,130,246,0.12);
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  font-family: 'Instrument Sans', sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  height: 100%;
+}
+
+h1, h2, h3 {
+  font-family: 'DM Serif Display', serif;
+  font-weight: 400;
+}
+
+/* Scrollbar styles */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-base);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.1);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.2);
+}
+
+/* Card base */
+.card {
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  padding: 24px;
+}
+
+/* Input base */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="tel"],
+input[type="number"],
+input[type="date"],
+textarea,
+select {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-accent);
+  color: var(--text-primary);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-family: 'Instrument Sans', sans-serif;
+  font-size: 14px;
+  outline: none;
+  width: 100%;
+  transition: border-color 0.15s;
+}
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+input[type="tel"]:focus,
+input[type="number"]:focus,
+input[type="date"]:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--accent-teal);
+}
+input::placeholder, textarea::placeholder {
+  color: var(--text-subtle);
+}
+
+select option {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+/* Button base */
+button {
+  font-family: 'Instrument Sans', sans-serif;
+  cursor: pointer;
+}
+
+/* Status dots */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.status-dot.on-track { background-color: var(--accent-green); }
+.status-dot.watch { background-color: var(--accent-amber); }
+.status-dot.action-needed { background-color: var(--accent-red); }
+
+/* Recharts overrides */
+.recharts-tooltip-wrapper {
+  outline: none;
+}
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+  stroke: rgba(255,255,255,0.05);
+}
+.recharts-text {
+  fill: var(--text-subtle);
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+}
