@@ -188,11 +188,10 @@ function TimelyTab() {
           return;
         }
         try {
-          const res = await fetch('https://api.timelyapp.com/oauth/token', {
+          const res = await fetch('/.netlify/functions/timely-token', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              grant_type: 'authorization_code',
               client_id: s.timely_client_id,
               client_secret: s.timely_client_secret,
               code,

@@ -364,17 +364,15 @@ export async function syncTimelyData(
   let synced = 0;
 
   try {
-    // Fetch all time entries for the account (paginated)
-    const url = `https://api.timelyapp.com/1.1/${accountId}/events?per_page=1000`;
+    // Fetch all time entries via server-side proxy (avoids CORS)
+    const url = `/.netlify/functions/timely-events?account_id=${encodeURIComponent(accountId)}`;
     const res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { Authorization: `Bearer ${token}` },
     });
 
     if (!res.ok) {
-      errors.push(`Timely API error: ${res.status} ${res.statusText}`);
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      errors.push(`Timely API error: ${res.status} ${err.error ?? res.statusText}`);
       return { synced, errors };
     }
 
