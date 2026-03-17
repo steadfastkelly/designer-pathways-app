@@ -11,11 +11,12 @@ export function getAvatarColor(name: string): string {
 }
 
 export function Avatar({ name, avatarUrl, size = 48 }: { name: string; avatarUrl?: string; size?: number }) {
+  const safeName = name || '?';
   if (avatarUrl) {
     return (
       <img
         src={avatarUrl}
-        alt={name}
+        alt={safeName}
         style={{
           width: size, height: size, borderRadius: '50%', objectFit: 'cover',
           flexShrink: 0, display: 'block',
@@ -25,8 +26,8 @@ export function Avatar({ name, avatarUrl, size = 48 }: { name: string; avatarUrl
       />
     );
   }
-  const color = getAvatarColor(name);
-  const initials = name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
+  const color = getAvatarColor(safeName);
+  const initials = safeName.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
   return (
     <div style={{
       width: size, height: size, borderRadius: '50%', background: color,

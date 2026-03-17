@@ -13,8 +13,9 @@ function getAvatarColor(name: string): string {
 }
 
 function Avatar({ name, size = 32 }: { name: string; size?: number }) {
-  const color = getAvatarColor(name);
-  const initials = name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
+  const safeName = name || '?';
+  const color = getAvatarColor(safeName);
+  const initials = safeName.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
   return (
     <div style={{
       width: size, height: size, borderRadius: '50%', background: color,
