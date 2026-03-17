@@ -236,7 +236,7 @@ function TimelyTab() {
       setAppSetting('timely_client_secret', clientSecret),
       setAppSetting('timely_account_id', accountId),
     ]);
-    const authUrl = `https://api.timelyapp.com/oauth/authorize?response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(TIMELY_REDIRECT_URI)}&state=timely`;
+    const authUrl = `https://api.timelyapp.com/1.1/oauth/authorize?response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(TIMELY_REDIRECT_URI)}&state=timely`;
     window.location.href = authUrl;
   };
 

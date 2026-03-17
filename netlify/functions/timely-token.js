@@ -17,7 +17,7 @@ exports.handler = async (event) => {
   }
 
   try {
-    const res = await fetch('https://api.timelyapp.com/oauth/token', {
+    const res = await fetch('https://api.timelyapp.com/1.1/oauth/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ grant_type: 'authorization_code', client_id, client_secret, code, redirect_uri }),
