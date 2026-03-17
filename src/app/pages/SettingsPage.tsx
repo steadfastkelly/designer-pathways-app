@@ -147,28 +147,82 @@ function CredentialField({
 
 // ─── Timely Tab ────────────────────────────────────────────────────────────────
 
+const TIMELY_REDIRECT_URI = `${window.location.origin}/settings`;
+
 function TimelyTab() {
-  const [token, setToken] = useState('');
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
   const [accountId, setAccountId] = useState('');
+  const [accessToken, setAccessToken] = useState('');
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<{ synced: number; errors: string[] } | null>(null);
 
+  // Load saved settings
   useEffect(() => {
-    getAppSettings(['timely_token', 'timely_account_id', 'timely_last_sync']).then(s => {
-      if (s.timely_token) setToken(s.timely_token);
+    getAppSettings(['timely_client_id', 'timely_client_secret', 'timely_account_id', 'timely_access_token', 'timely_last_sync']).then(s => {
+      if (s.timely_client_id) setClientId(s.timely_client_id);
+      if (s.timely_client_secret) setClientSecret(s.timely_client_secret);
       if (s.timely_account_id) setAccountId(s.timely_account_id);
+      if (s.timely_access_token) setAccessToken(s.timely_access_token);
       if (s.timely_last_sync) setLastSync(s.timely_last_sync);
     });
+  }, []);
+
+  // Handle OAuth callback — Timely redirects back here with ?code=XXX&state=timely
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    const state = params.get('state');
+    if (code && state === 'timely') {
+      window.history.replaceState({}, '', '/settings');
+      setConnecting(true);
+      getAppSettings(['timely_client_id', 'timely_client_secret', 'timely_account_id']).then(async s => {
+        if (!s.timely_client_id || !s.timely_client_secret) {
+          setConnectError('Saved credentials not found. Please re-enter your Application ID and Secret and try connecting again.');
+          setConnecting(false);
+          return;
+        }
+        try {
+          const res = await fetch('https://api.timelyapp.com/oauth/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({
+              grant_type: 'authorization_code',
+              client_id: s.timely_client_id,
+              client_secret: s.timely_client_secret,
+              code,
+              redirect_uri: TIMELY_REDIRECT_URI,
+            }),
+          });
+          const data = await res.json();
+          if (data.access_token) {
+            setAccessToken(data.access_token);
+            setClientId(s.timely_client_id);
+            setClientSecret(s.timely_client_secret);
+            if (s.timely_account_id) setAccountId(s.timely_account_id);
+            await setAppSetting('timely_access_token', data.access_token);
+          } else {
+            setConnectError(`Timely did not return an access token. Response: ${JSON.stringify(data)}`);
+          }
+        } catch (e) {
+          setConnectError(`Connection failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        setConnecting(false);
+      });
+    }
   }, []);
 
   const handleSave = async () => {
     setSaving(true);
     setSaved(false);
     await Promise.all([
-      setAppSetting('timely_token', token),
+      setAppSetting('timely_client_id', clientId),
+      setAppSetting('timely_client_secret', clientSecret),
       setAppSetting('timely_account_id', accountId),
     ]);
     setSaving(false);
@@ -176,23 +230,38 @@ function TimelyTab() {
     setTimeout(() => setSaved(false), 3000);
   };
 
+  const handleConnect = async () => {
+    if (!clientId || !clientSecret || !accountId) return;
+    await Promise.all([
+      setAppSetting('timely_client_id', clientId),
+      setAppSetting('timely_client_secret', clientSecret),
+      setAppSetting('timely_account_id', accountId),
+    ]);
+    const authUrl = `https://api.timelyapp.com/oauth/authorize?response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(TIMELY_REDIRECT_URI)}&state=timely`;
+    window.location.href = authUrl;
+  };
+
   const handleSync = useCallback(async () => {
-    if (!token || !accountId) return;
+    if (!accessToken || !accountId) return;
     setSyncing(true);
     setSyncResult(null);
-    const result = await syncTimelyData(token, accountId);
+    const result = await syncTimelyData(accessToken, accountId);
     setSyncResult(result);
     setSyncing(false);
-    if (result.errors.length === 0) {
-      setLastSync(new Date().toISOString());
-    }
-  }, [token, accountId]);
+    if (result.errors.length === 0) setLastSync(new Date().toISOString());
+  }, [accessToken, accountId]);
 
-  const isConnected = !!(token && accountId);
+  const handleDisconnect = async () => {
+    setAccessToken('');
+    await setAppSetting('timely_access_token', '');
+  };
+
+  const isConfigured = !!(clientId && clientSecret && accountId);
+  const isConnected = !!accessToken;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* Header card */}
+      {/* Header */}
       <div className="card" style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
         <div style={{ width: 44, height: 44, borderRadius: 10, background: 'var(--accent-teal-dim)', border: '1px solid var(--accent-teal)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           <Clock size={20} color="var(--accent-teal)" />
@@ -203,60 +272,107 @@ function TimelyTab() {
             <ConnectionBadge connected={isConnected} />
           </div>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, margin: 0 }}>
-            Syncs billable and internal hours per designer from Timely. Enter your personal access token and account ID below.
+            Syncs billable and internal hours per designer from Timely via OAuth. Create an API application in Timely to get started.
           </p>
         </div>
       </div>
 
-      {/* Credentials form */}
+      {/* Connecting status */}
+      {connecting && (
+        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--accent-teal)', fontSize: 13 }}>
+          <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} />
+          Completing Timely connection…
+        </div>
+      )}
+      {connectError && (
+        <div style={{ padding: '12px 16px', borderRadius: 10, background: 'var(--accent-red-dim)', border: '1px solid var(--accent-red)', fontSize: 13, color: 'var(--accent-red)' }}>
+          {connectError}
+        </div>
+      )}
+
+      {/* OAuth app credentials */}
       <div className="card">
         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 16 }}>
-          API Credentials
+          OAuth Application Credentials
         </div>
         <CredentialField
-          label="Personal Access Token"
-          value={token}
-          onChange={setToken}
-          placeholder="Paste your Timely personal access token…"
+          label="Application ID"
+          value={clientId}
+          onChange={setClientId}
+          placeholder="Your Timely Application ID"
+          hint="Timely → API → My Applications"
+        />
+        <CredentialField
+          label="Application Secret"
+          value={clientSecret}
+          onChange={setClientSecret}
+          placeholder="Your Timely Application Secret"
           secret
-          hint="Settings → Account → API"
+          hint="Timely → API → My Applications"
         />
         <CredentialField
           label="Account ID"
           value={accountId}
           onChange={setAccountId}
           placeholder="e.g. 123456"
-          hint="Found in your Timely account URL"
+          hint="The number in your Timely URL"
         />
-        <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+
+        {/* Callback URL reminder */}
+        <div style={{ marginBottom: 16, padding: '10px 14px', background: 'var(--bg-surface)', borderRadius: 8, border: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Callback URL (paste this into Timely)</div>
+          <code style={{ fontSize: 12, color: 'var(--accent-teal)', fontFamily: 'DM Mono, monospace' }}>{TIMELY_REDIRECT_URI}</code>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <button
             onClick={handleSave}
             disabled={saving}
             style={{
               display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
-              background: saved ? 'var(--accent-green-dim)' : 'var(--accent-teal)',
-              color: saved ? 'var(--accent-green)' : '#0f1117',
-              border: saved ? '1px solid var(--accent-green)' : 'none',
-              borderRadius: 8, fontSize: 13, fontWeight: 600,
-              cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1,
+              background: saved ? 'var(--accent-green-dim)' : 'var(--bg-surface)',
+              color: saved ? 'var(--accent-green)' : 'var(--text-primary)',
+              border: `1px solid ${saved ? 'var(--accent-green)' : 'var(--border-accent)'}`,
+              borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: saving ? 'not-allowed' : 'pointer',
             }}
           >
             {saved ? <CheckCircle size={14} /> : <Save size={14} />}
-            {saved ? 'Saved!' : saving ? 'Saving…' : 'Save Credentials'}
+            {saved ? 'Saved!' : 'Save'}
           </button>
           <button
-            onClick={handleSync}
-            disabled={syncing || !isConnected}
+            onClick={handleConnect}
+            disabled={!isConfigured}
             style={{
               display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
-              background: 'var(--bg-inner)', color: isConnected ? 'var(--text-secondary)' : 'var(--text-subtle)',
-              border: '1px solid var(--border)', borderRadius: 8, fontSize: 13, fontWeight: 500,
-              cursor: syncing || !isConnected ? 'not-allowed' : 'pointer',
+              background: isConfigured ? 'var(--accent-teal)' : 'var(--bg-surface)',
+              color: isConfigured ? '#0f1117' : 'var(--text-subtle)',
+              border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600,
+              cursor: isConfigured ? 'pointer' : 'not-allowed',
             }}
           >
-            <RefreshCw size={14} style={{ animation: syncing ? 'spin 1s linear infinite' : 'none' }} />
-            {syncing ? 'Syncing…' : 'Sync Now'}
+            <ExternalLink size={14} />
+            {isConnected ? 'Reconnect Timely' : 'Connect Timely'}
           </button>
+          {isConnected && (
+            <button
+              onClick={handleSync}
+              disabled={syncing}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
+                background: 'var(--bg-inner)', color: 'var(--text-secondary)',
+                border: '1px solid var(--border)', borderRadius: 8, fontSize: 13, fontWeight: 500,
+                cursor: syncing ? 'not-allowed' : 'pointer',
+              }}
+            >
+              <RefreshCw size={14} style={{ animation: syncing ? 'spin 1s linear infinite' : 'none' }} />
+              {syncing ? 'Syncing…' : 'Sync Now'}
+            </button>
+          )}
+          {isConnected && (
+            <button onClick={handleDisconnect} style={{ padding: '8px 14px', background: 'transparent', color: 'var(--text-subtle)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12, cursor: 'pointer' }}>
+              Disconnect
+            </button>
+          )}
         </div>
         {lastSync && (
           <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-subtle)' }}>
@@ -265,12 +381,8 @@ function TimelyTab() {
         )}
       </div>
 
-      {/* Sync result */}
-      {syncResult && (
-        <SyncResult result={syncResult} />
-      )}
+      {syncResult && <SyncResult result={syncResult} />}
 
-      {/* What this does */}
       <FeatureCard title="What This Sync Does" features={[
         'Fetches all time entries from Timely and groups by designer + month',
         'Calculates total, billable, and internal hours per month',
@@ -280,11 +392,12 @@ function TimelyTab() {
       ]} />
 
       <SetupGuide steps={[
-        'In Timely, go to Settings → Account → API and create a personal access token',
-        'Copy your Account ID from the URL (timelyapp.com/XXX)',
-        'Paste both above and click Save Credentials',
-        'Click Sync Now to pull all historical data',
-        'For automated hourly syncs, set up a Supabase Edge Function with a cron trigger',
+        'In Timely, go to API → My Applications → New Application',
+        `Set the Callback URL to exactly: ${TIMELY_REDIRECT_URI}`,
+        'Copy the Application ID and Secret into the fields above',
+        'Copy your Account ID from the Timely URL (timelyapp.com/XXXXXX)',
+        'Click Save, then Connect Timely — you\'ll be redirected to authorise',
+        'After authorising, click Sync Now to pull all historical data',
       ]} />
     </div>
   );
