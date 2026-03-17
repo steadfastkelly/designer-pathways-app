@@ -4,21 +4,35 @@ import { PATHWAY_LEVEL_LABELS } from '../../types';
 import { useAuth } from '../../hooks/useAuth';
 
 export function getAvatarColor(name: string): string {
-  const colors = ['#2DD4BF', '#7C3AED', '#F59E0B', '#10B981', '#3B82F6', '#EF4444'];
+  const colors = ['#55aaaa', '#796f8e', '#b19a67', '#4ade80', '#60a5fa', '#f87171'];
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
   return colors[Math.abs(hash) % colors.length];
 }
 
-export function Avatar({ name, size = 48 }: { name: string; size?: number }) {
+export function Avatar({ name, avatarUrl, size = 48 }: { name: string; avatarUrl?: string; size?: number }) {
+  if (avatarUrl) {
+    return (
+      <img
+        src={avatarUrl}
+        alt={name}
+        style={{
+          width: size, height: size, borderRadius: '50%', objectFit: 'cover',
+          flexShrink: 0, display: 'block',
+          boxShadow: '0 0 0 2px var(--bg-card)',
+        }}
+        onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+      />
+    );
+  }
   const color = getAvatarColor(name);
   const initials = name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
   return (
     <div style={{
       width: size, height: size, borderRadius: '50%', background: color,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontSize: size * 0.33, fontWeight: 600, color: '#0F1117', flexShrink: 0,
-      fontFamily: 'Instrument Sans, sans-serif',
+      fontSize: size * 0.35, fontWeight: 600, color: '#1a1e24', flexShrink: 0,
+      fontFamily: 'Inter, sans-serif', letterSpacing: '-0.02em',
     }}>
       {initials}
     </div>
@@ -62,9 +76,9 @@ export function DesignerCard({ profile, score, currentMonth }: Props) {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <Avatar name={profile.name} size={48} />
+          <Avatar name={profile.name} avatarUrl={profile.avatarUrl} size={48} />
           <div>
-            <div style={{ fontFamily: 'DM Serif Display, serif', fontSize: 16, color: 'var(--text-primary)', lineHeight: 1.2 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.2 }}>
               {profile.name}
             </div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>

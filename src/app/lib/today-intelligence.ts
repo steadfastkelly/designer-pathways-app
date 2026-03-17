@@ -15,7 +15,7 @@ export function getTeamHealth(
   allMonthlyHours: MonthlyHoursSummary[],
   allDeadlines: ClickupDeadline[],
 ): TeamHealthResult {
-  const activeDesigners = designers.filter(d => d.isActive && d.role === 'designer');
+  const activeDesigners = (designers ?? []).filter(d => d.isActive && d.role === 'designer');
   const redDesigners: string[] = [];
   const amberDesigners: string[] = [];
 
@@ -23,13 +23,13 @@ export function getTeamHealth(
     const target = getBillableTarget(designer.email, designer);
     if (target.exempt) continue;
 
-    const hours = allMonthlyHours
+    const hours = (allMonthlyHours ?? [])
       .filter(h => h.designerId === designer.id)
       .sort((a, b) => b.year !== a.year ? b.year - a.year : b.month - a.month);
 
     if (hours.length === 0) continue;
 
-    const deadlines = allDeadlines.filter(d => d.designerId === designer.id);
+    const deadlines = (allDeadlines ?? []).filter(d => d.designerId === designer.id);
     const score = getDesignerScore(designer, hours, deadlines);
 
     if (score.consecutiveMonthsBelowTarget >= 2) {
@@ -84,14 +84,14 @@ export function getAttentionItems(
   const items: AttentionItem[] = [];
   const seen = new Set<string>();
 
-  const activeDesigners = designers.filter(d => d.isActive && d.role === 'designer');
+  const activeDesigners = (designers ?? []).filter(d => d.isActive && d.role === 'designer');
   const in30Days = addDays(TODAY, 30);
   const in14Days = addDays(TODAY, 14);
   const in7Days = addDays(TODAY, 7);
 
   for (const designer of activeDesigners) {
-    const designerHours = allMonthlyHours.filter(h => h.designerId === designer.id);
-    const designerDeadlines = allDeadlines.filter(d => d.designerId === designer.id);
+    const designerHours = (allMonthlyHours ?? []).filter(h => h.designerId === designer.id);
+    const designerDeadlines = (allDeadlines ?? []).filter(d => d.designerId === designer.id);
     const score = getDesignerScore(designer, designerHours, designerDeadlines);
 
     // utilization-red: 2+ consecutive months below target
@@ -109,7 +109,7 @@ export function getAttentionItems(
     }
 
     // pip-checkin: active PIP with end within 7 days
-    const activePip = allPips.find(p => p.designerId === designer.id && p.isActive);
+    const activePip = (allPips ?? []).find(p => p.designerId === designer.id && p.isActive);
     if (activePip?.endDate) {
       const endDate = parseISO(activePip.endDate);
       if (isBefore(endDate, in7Days) && isAfter(endDate, TODAY)) {
@@ -154,7 +154,7 @@ export function getAttentionItems(
     }
 
     // blocker-pattern: blockers in 2+ consecutive reflections
-    const designerReflections = allReflections
+    const designerReflections = (allReflections ?? [])
       .filter(r => r.designerId === designer.id)
       .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))
       .slice(0, 3);
@@ -173,7 +173,7 @@ export function getAttentionItems(
   }
 
   // review-due: period_end within 14 days, not complete
-  for (const review of allReviews) {
+  for (const review of (allReviews ?? [])) {
     if (review.completedAt) continue;
     const periodEnd = parseISO(review.periodEnd);
     if (isBefore(periodEnd, in14Days) && isAfter(periodEnd, TODAY)) {
@@ -193,7 +193,7 @@ export function getAttentionItems(
   }
 
   // bonus-due: unpaid bonus within 30 days
-  for (const bonus of allBonuses) {
+  for (const bonus of (allBonuses ?? [])) {
     if (bonus.isPaid || !bonus.payoutDate) continue;
     const payoutDate = parseISO(bonus.payoutDate);
     if (isBefore(payoutDate, in30Days) && isAfter(payoutDate, TODAY)) {
@@ -228,11 +228,11 @@ export function getComingUp(
   const items: ComingUpItem[] = [];
   const in30Days = addDays(TODAY, 30);
 
-  for (const review of allReviews) {
+  for (const review of (allReviews ?? [])) {
     if (review.completedAt) continue;
     const periodEnd = parseISO(review.periodEnd);
     if (isAfter(periodEnd, TODAY) && isBefore(periodEnd, in30Days)) {
-      const designer = designers.find(d => d.id === review.designerId);
+      const designer = (designers ?? []).find(d => d.id === review.designerId);
       items.push({
         id: `review-${review.id}`,
         type: 'review',
@@ -245,11 +245,11 @@ export function getComingUp(
     }
   }
 
-  for (const bonus of allBonuses) {
+  for (const bonus of (allBonuses ?? [])) {
     if (bonus.isPaid || !bonus.payoutDate) continue;
     const payoutDate = parseISO(bonus.payoutDate);
     if (isAfter(payoutDate, TODAY) && isBefore(payoutDate, in30Days)) {
-      const designer = designers.find(d => d.id === bonus.designerId);
+      const designer = (designers ?? []).find(d => d.id === bonus.designerId);
       items.push({
         id: `bonus-${bonus.id}`,
         type: 'bonus',
@@ -262,11 +262,11 @@ export function getComingUp(
     }
   }
 
-  for (const pip of allPips) {
+  for (const pip of (allPips ?? [])) {
     if (!pip.isActive || !pip.endDate) continue;
     const endDate = parseISO(pip.endDate);
     if (isAfter(endDate, TODAY) && isBefore(endDate, in30Days)) {
-      const designer = designers.find(d => d.id === pip.designerId);
+      const designer = (designers ?? []).find(d => d.id === pip.designerId);
       items.push({
         id: `pip-${pip.id}`,
         type: 'pip',

@@ -66,6 +66,7 @@ export async function updateProfile(
     billable_target_min: number | null;
     billable_target_max: number | null;
     billable_target_exempt: boolean;
+    avatar_url: string | null;
   }>
 ): Promise<Profile | null> {
   const { data, error } = await supabase
@@ -299,4 +300,238 @@ export async function getPipRecords(designerId?: string): Promise<PipRecord[]> {
   const { data, error } = await query;
   if (error || !data) return [];
   return data.map(mapPipRecord);
+}
+
+// ─── App Settings ──────────────────────────────────────────────────────────────
+// Requires table: app_settings (key text PRIMARY KEY, value text, updated_at timestamptz)
+
+export async function getAppSetting(key: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('app_settings')
+    .select('value')
+    .eq('key', key)
+    .single();
+  if (error || !data) return null;
+  return data.value;
+}
+
+export async function getAppSettings(keys: string[]): Promise<Record<string, string>> {
+  const { data, error } = await supabase
+    .from('app_settings')
+    .select('key, value')
+    .in('key', keys);
+  if (error || !data) return {};
+  return Object.fromEntries(data.map((r: { key: string; value: string }) => [r.key, r.value]));
+}
+
+export async function setAppSetting(key: string, value: string): Promise<boolean> {
+  const { error } = await supabase
+    .from('app_settings')
+    .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+  return !error;
+}
+
+export async function deleteAppSetting(key: string): Promise<void> {
+  await supabase.from('app_settings').delete().eq('key', key);
+}
+
+// ─── Avatar Upload ─────────────────────────────────────────────────────────────
+// Requires Supabase Storage bucket: 'avatars' (public)
+
+export async function uploadAvatar(file: File, userId: string): Promise<string | null> {
+  const ext = file.name.split('.').pop() ?? 'jpg';
+  const path = `${userId}.${ext}`;
+  const { error } = await supabase.storage
+    .from('avatars')
+    .upload(path, file, { upsert: true, contentType: file.type });
+  if (error) { console.error('uploadAvatar error:', error); return null; }
+  const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+  return data.publicUrl ?? null;
+}
+
+// ─── Timely Sync ───────────────────────────────────────────────────────────────
+
+export interface TimelySyncResult {
+  synced: number;
+  errors: string[];
+}
+
+export async function syncTimelyData(
+  token: string,
+  accountId: string,
+): Promise<TimelySyncResult> {
+  const errors: string[] = [];
+  let synced = 0;
+
+  try {
+    // Fetch all time entries for the account (paginated)
+    const url = `https://api.timelyapp.com/1.1/${accountId}/events?per_page=1000`;
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!res.ok) {
+      errors.push(`Timely API error: ${res.status} ${res.statusText}`);
+      return { synced, errors };
+    }
+
+    const events: TimelySyncResult[] = await res.json();
+    if (!Array.isArray(events)) {
+      errors.push('Unexpected Timely API response format');
+      return { synced, errors };
+    }
+
+    // Group events by user + year + month
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const grouped: Record<string, { userId: string; email: string; year: number; month: number; totalHours: number; billableHours: number; internalHours: number }> = {};
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const event of events as any[]) {
+      const userId = event.user?.id;
+      const email = event.user?.email?.toLowerCase();
+      if (!userId || !email) continue;
+
+      const date = new Date(event.day);
+      if (isNaN(date.getTime())) continue;
+
+      const year = date.getFullYear();
+      const month = date.getMonth() + 1;
+      const key = `${email}-${year}-${month}`;
+      const hours = (event.duration?.hours ?? 0) + (event.duration?.minutes ?? 0) / 60;
+      const billable = event.billed === true || event.billable === true;
+
+      if (!grouped[key]) {
+        grouped[key] = { userId, email, year, month, totalHours: 0, billableHours: 0, internalHours: 0 };
+      }
+      grouped[key].totalHours += hours;
+      if (billable) grouped[key].billableHours += hours;
+      else grouped[key].internalHours += hours;
+    }
+
+    // Get all designers to map email → id
+    const designers = await getAllProfiles();
+    const emailToId: Record<string, string> = {};
+    for (const d of designers) {
+      emailToId[d.email.toLowerCase()] = d.id;
+    }
+
+    // Upsert monthly summaries
+    for (const entry of Object.values(grouped)) {
+      const designerId = emailToId[entry.email];
+      if (!designerId) continue;
+
+      const billablePercent = entry.totalHours > 0
+        ? Math.round((entry.billableHours / entry.totalHours) * 100)
+        : 0;
+
+      const { error } = await supabase
+        .from('monthly_hours_summary')
+        .upsert({
+          designer_id: designerId,
+          year: entry.year,
+          month: entry.month,
+          total_hours: Math.round(entry.totalHours * 100) / 100,
+          billable_hours: Math.round(entry.billableHours * 100) / 100,
+          internal_hours: Math.round(entry.internalHours * 100) / 100,
+          billable_percent: billablePercent,
+          logging_days: 0,
+          internal_breakdown: {},
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'designer_id,year,month' });
+
+      if (error) errors.push(`Upsert error for ${entry.email} ${entry.year}/${entry.month}: ${error.message}`);
+      else synced++;
+    }
+
+    await setAppSetting('timely_last_sync', new Date().toISOString());
+  } catch (e) {
+    errors.push(`Sync failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  return { synced, errors };
+}
+
+// ─── ClickUp Sync ──────────────────────────────────────────────────────────────
+
+export async function syncClickUpData(
+  apiKey: string,
+  teamId: string,
+): Promise<TimelySyncResult> {
+  const errors: string[] = [];
+  let synced = 0;
+
+  try {
+    // Fetch all tasks from the team — paginate through
+    let page = 0;
+    let hasMore = true;
+    const allTasks: unknown[] = [];
+
+    while (hasMore) {
+      const res = await fetch(
+        `https://api.clickup.com/api/v2/team/${teamId}/task?page=${page}&include_closed=true&subtasks=true&per_page=100`,
+        { headers: { Authorization: apiKey } },
+      );
+
+      if (!res.ok) {
+        errors.push(`ClickUp API error: ${res.status} ${res.statusText}`);
+        break;
+      }
+
+      const json = await res.json();
+      const tasks = json.tasks ?? [];
+      allTasks.push(...tasks);
+      hasMore = tasks.length === 100;
+      page++;
+    }
+
+    // Get designers to map email → id
+    const designers = await getAllProfiles();
+    const emailToId: Record<string, string> = {};
+    for (const d of designers) emailToId[d.email.toLowerCase()] = d.id;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const task of allTasks as any[]) {
+      const dueDate = task.due_date ? new Date(Number(task.due_date)) : null;
+      const completedDate = task.date_closed ? new Date(Number(task.date_closed)) : null;
+
+      if (!dueDate) continue;
+
+      const wasLate = !!(completedDate && completedDate > dueDate);
+      const daysLate = wasLate
+        ? Math.ceil((completedDate!.getTime() - dueDate.getTime()) / 86400000)
+        : 0;
+
+      for (const assignee of (task.assignees ?? [])) {
+        const email = assignee.email?.toLowerCase();
+        const designerId = email ? emailToId[email] : null;
+        if (!designerId) continue;
+
+        const { error } = await supabase
+          .from('clickup_deadlines')
+          .upsert({
+            clickup_task_id: task.id,
+            designer_id: designerId,
+            task_name: task.name ?? 'Untitled',
+            due_date: dueDate.toISOString().slice(0, 10),
+            completed_date: completedDate ? completedDate.toISOString().slice(0, 10) : null,
+            was_late: wasLate,
+            days_late: daysLate,
+            clickup_url: task.url ?? null,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'clickup_task_id,designer_id' });
+
+        if (error) errors.push(`ClickUp upsert error ${task.id}: ${error.message}`);
+        else synced++;
+      }
+    }
+
+    await setAppSetting('clickup_last_sync', new Date().toISOString());
+  } catch (e) {
+    errors.push(`Sync failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  return { synced, errors };
 }

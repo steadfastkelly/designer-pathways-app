@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
-import { X } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { X, Camera } from 'lucide-react';
 import type { Profile, PathwayLevel, PathwayTrack, ScheduleType } from '../../types';
 import { PATHWAY_LEVEL_LABELS, PATHWAY_LEVEL_ORDER, PATHWAY_TRACK_LABELS, SCHEDULE_TYPE_LABELS } from '../../types';
-import { updateProfile } from '../../lib/api';
+import { updateProfile, uploadAvatar } from '../../lib/api';
+import { Avatar } from '../team/DesignerCard';
 
 interface Props {
   profile: Profile;
@@ -15,6 +16,9 @@ const REGIONS = ['Southeast', 'Midwest', 'Northeast', 'West', 'Remote-Internatio
 export function EditProfileDialog({ profile, onClose, onSaved }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState(profile.avatarUrl ?? '');
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Form state
   const [externalTitle, setExternalTitle] = useState(profile.externalTitle ?? '');
@@ -44,6 +48,20 @@ export function EditProfileDialog({ profile, onClose, onSaved }: Props) {
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, [onClose]);
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingAvatar(true);
+    const url = await uploadAvatar(file, profile.id);
+    if (url) {
+      setAvatarUrl(url);
+      await updateProfile(profile.id, { avatar_url: url });
+    } else {
+      setError('Failed to upload photo. Check your Supabase Storage bucket (avatars) is public.');
+    }
+    setUploadingAvatar(false);
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -79,9 +97,9 @@ export function EditProfileDialog({ profile, onClose, onSaved }: Props) {
   };
 
   const inputStyle: React.CSSProperties = {
-    background: 'var(--bg-base)', border: '1px solid var(--border-accent)',
+    background: 'var(--bg-inner)', border: '1px solid var(--border)',
     color: 'var(--text-primary)', borderRadius: 8, padding: '9px 12px',
-    fontFamily: 'Instrument Sans, sans-serif', fontSize: 14, outline: 'none',
+    fontFamily: 'Inter, sans-serif', fontSize: 13, outline: 'none',
     width: '100%', transition: 'border-color 0.15s',
   };
   const labelStyle: React.CSSProperties = {
@@ -115,6 +133,51 @@ export function EditProfileDialog({ profile, onClose, onSaved }: Props) {
 
         {/* Scrollable Content */}
         <div style={{ padding: '0 28px 24px', maxHeight: '72vh', overflowY: 'auto' }}>
+
+          {/* Profile Photo */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, paddingTop: 20, paddingBottom: 20, borderBottom: '1px solid var(--border)' }}>
+            <div style={{ position: 'relative', flexShrink: 0 }}>
+              <Avatar name={profile.name} avatarUrl={avatarUrl || undefined} size={64} />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadingAvatar}
+                style={{
+                  position: 'absolute', bottom: -2, right: -2,
+                  width: 24, height: 24, borderRadius: '50%',
+                  background: 'var(--accent-teal)', border: '2px solid var(--bg-card)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer', padding: 0,
+                }}
+              >
+                <Camera size={12} color="#1a1e24" />
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                style={{ display: 'none' }}
+                onChange={handleAvatarUpload}
+              />
+            </div>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 3 }}>Profile Photo</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+                {uploadingAvatar ? 'Uploading…' : 'JPG, PNG, WebP — shown throughout the app'}
+              </div>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadingAvatar}
+                style={{
+                  padding: '5px 12px', background: 'var(--bg-inner)', border: '1px solid var(--border)',
+                  color: 'var(--text-muted)', borderRadius: 6, fontSize: 12, cursor: 'pointer',
+                }}
+              >
+                {uploadingAvatar ? 'Uploading…' : 'Upload Photo'}
+              </button>
+            </div>
+          </div>
 
           {/* Section 1: Role & Position */}
           <div style={sectionHeaderStyle}>Role & Position</div>

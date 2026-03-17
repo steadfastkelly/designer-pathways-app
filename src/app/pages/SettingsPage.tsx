@@ -1,11 +1,17 @@
-import { useState } from 'react';
-import { Users, Clock, CheckSquare, ExternalLink } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Users, Clock, CheckSquare, ExternalLink, Save, RefreshCw, CheckCircle, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { useTeamData } from '../hooks/useTeamData';
 import { Link } from 'react-router-dom';
 import { Avatar } from '../components/team/DesignerCard';
 import { PATHWAY_LEVEL_LABELS } from '../types';
+import {
+  getAppSettings, setAppSetting,
+  syncTimelyData, syncClickUpData,
+} from '../lib/api';
 
 type TabId = 'profiles' | 'timely' | 'clickup';
+
+const S: React.CSSProperties = {};
 
 export function SettingsPage() {
   const [activeTab, setActiveTab] = useState<TabId>('profiles');
@@ -17,143 +23,479 @@ export function SettingsPage() {
     { id: 'clickup' as TabId, label: 'ClickUp Integration', icon: CheckSquare },
   ];
 
-  const tabBtnStyle = (active: boolean): React.CSSProperties => ({
-    display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', borderRadius: 7,
-    fontSize: 13, fontWeight: 500, cursor: 'pointer', border: 'none', transition: 'all 0.15s',
+  void S;
+
+  const tabBtn = (active: boolean): React.CSSProperties => ({
+    display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px',
+    borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: 'pointer',
+    border: 'none', transition: 'all 0.15s',
     background: active ? 'var(--bg-card)' : 'transparent',
     color: active ? 'var(--text-primary)' : 'var(--text-muted)',
+    boxShadow: active ? '0 1px 3px rgba(0,0,0,0.2)' : 'none',
   });
 
   return (
     <div style={{ maxWidth: 900 }}>
       <div style={{ marginBottom: 28 }}>
-        <h1 style={{ fontSize: 28, marginBottom: 6 }}>Settings</h1>
-        <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: 0 }}>Integrations, user management, and system configuration</p>
+        <h1 style={{ fontSize: 24, fontWeight: 600, marginBottom: 4 }}>Settings</h1>
+        <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: 0 }}>
+          Integrations, user management, and system configuration
+        </p>
       </div>
 
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: 4, marginBottom: 28, background: 'var(--bg-surface)', borderRadius: 10, padding: 4, width: 'fit-content' }}>
+      <div style={{
+        display: 'flex', gap: 4, marginBottom: 28,
+        background: 'var(--bg-surface)', borderRadius: 10, padding: 4, width: 'fit-content',
+        border: '1px solid var(--border)',
+      }}>
         {tabs.map(({ id, label, icon: Icon }) => (
-          <button key={id} style={tabBtnStyle(activeTab === id)} onClick={() => setActiveTab(id)}>
-            <Icon size={14} />
-            {label}
+          <button key={id} style={tabBtn(activeTab === id)} onClick={() => setActiveTab(id)}>
+            <Icon size={14} />{label}
           </button>
         ))}
       </div>
 
       {activeTab === 'profiles' && (
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-            <h2 style={{ fontSize: 18 }}>Designer Profiles</h2>
-            <div style={{ fontSize: 13, color: 'var(--text-subtle)' }}>{members.length} active designers</div>
-          </div>
-          {loading ? (
-            <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Loading…</div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {members.map(({ profile }) => (
-                <div key={profile.id} className="card" style={{ padding: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <Avatar name={profile.name} size={40} />
-                    <div>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{profile.name}</div>
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                        {profile.externalTitle ?? '—'}
-                        {profile.pathwayLevel && ` · ${PATHWAY_LEVEL_LABELS[profile.pathwayLevel]}`}
-                      </div>
-                    </div>
+        <ProfilesTab members={members} loading={loading} />
+      )}
+      {activeTab === 'timely' && <TimelyTab />}
+      {activeTab === 'clickup' && <ClickUpTab />}
+    </div>
+  );
+}
+
+// ─── Profiles Tab ──────────────────────────────────────────────────────────────
+
+function ProfilesTab({ members, loading }: { members: ReturnType<typeof useTeamData>['members']; loading: boolean }) {
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 600 }}>Designer Profiles</h2>
+        <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>{members.length} active designers</div>
+      </div>
+      {loading ? (
+        <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Loading…</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {members.map(({ profile }) => (
+            <div key={profile.id} className="card" style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <Avatar name={profile.name} avatarUrl={profile.avatarUrl} size={38} />
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{profile.name}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    {profile.externalTitle ?? '—'}
+                    {profile.pathwayLevel && ` · ${PATHWAY_LEVEL_LABELS[profile.pathwayLevel]}`}
                   </div>
-                  <Link
-                    to={`/team/${profile.id}`}
-                    style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--accent-teal)', textDecoration: 'none', fontWeight: 500 }}
-                  >
-                    View Profile <ExternalLink size={12} />
-                  </Link>
                 </div>
-              ))}
+              </div>
+              <Link
+                to={`/team/${profile.id}`}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--accent-teal)', textDecoration: 'none', fontWeight: 500 }}
+              >
+                Edit Profile <ExternalLink size={12} />
+              </Link>
             </div>
-          )}
+          ))}
         </div>
       )}
+      <div style={{ marginTop: 20, padding: '14px 18px', background: 'var(--bg-surface)', borderRadius: 10, border: '1px solid var(--border)', fontSize: 12, color: 'var(--text-muted)' }}>
+        To upload a profile photo, open the designer's profile and click <strong style={{ color: 'var(--text-secondary)' }}>Edit Profile</strong> → <strong style={{ color: 'var(--text-secondary)' }}>Upload Photo</strong>.
+      </div>
+    </div>
+  );
+}
 
-      {activeTab === 'timely' && (
-        <IntegrationPanel
-          title="Timely Integration"
-          description="Connect to Timely to automatically sync billable and internal hours for all designers. The app tracks logging accuracy by comparing hourly snapshots."
-          icon={<Clock size={24} color="var(--accent-teal)" />}
-          envVars={['VITE_TIMELY_APP_ID', 'VITE_TIMELY_SECRET']}
-          features={[
-            'Syncs billable and internal hours per designer',
-            'Detects logging corrections and tracks accuracy',
-            'Flags potential mislabeled billable work',
-            'Identifies internal hours spikes',
-          ]}
+// ─── Shared credential field ───────────────────────────────────────────────────
+
+function CredentialField({
+  label, value, onChange, placeholder, secret = false, hint,
+}: {
+  label: string; value: string; onChange: (v: string) => void;
+  placeholder?: string; secret?: boolean; hint?: string;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+        <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          {label}
+        </label>
+        {hint && <span style={{ fontSize: 11, color: 'var(--text-subtle)' }}>{hint}</span>}
+      </div>
+      <div style={{ position: 'relative' }}>
+        <input
+          type={secret && !show ? 'password' : 'text'}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          placeholder={placeholder}
+          style={{ paddingRight: secret ? 40 : 12 }}
         />
+        {secret && (
+          <button
+            type="button"
+            onClick={() => setShow(s => !s)}
+            style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', padding: 2, display: 'flex' }}
+          >
+            {show ? <EyeOff size={14} /> : <Eye size={14} />}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Timely Tab ────────────────────────────────────────────────────────────────
+
+function TimelyTab() {
+  const [token, setToken] = useState('');
+  const [accountId, setAccountId] = useState('');
+  const [lastSync, setLastSync] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<{ synced: number; errors: string[] } | null>(null);
+
+  useEffect(() => {
+    getAppSettings(['timely_token', 'timely_account_id', 'timely_last_sync']).then(s => {
+      if (s.timely_token) setToken(s.timely_token);
+      if (s.timely_account_id) setAccountId(s.timely_account_id);
+      if (s.timely_last_sync) setLastSync(s.timely_last_sync);
+    });
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaved(false);
+    await Promise.all([
+      setAppSetting('timely_token', token),
+      setAppSetting('timely_account_id', accountId),
+    ]);
+    setSaving(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
+  };
+
+  const handleSync = useCallback(async () => {
+    if (!token || !accountId) return;
+    setSyncing(true);
+    setSyncResult(null);
+    const result = await syncTimelyData(token, accountId);
+    setSyncResult(result);
+    setSyncing(false);
+    if (result.errors.length === 0) {
+      setLastSync(new Date().toISOString());
+    }
+  }, [token, accountId]);
+
+  const isConnected = !!(token && accountId);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Header card */}
+      <div className="card" style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+        <div style={{ width: 44, height: 44, borderRadius: 10, background: 'var(--accent-teal-dim)', border: '1px solid var(--accent-teal)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <Clock size={20} color="var(--accent-teal)" />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+            <h2 style={{ fontSize: 16, fontWeight: 600 }}>Timely Integration</h2>
+            <ConnectionBadge connected={isConnected} />
+          </div>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, margin: 0 }}>
+            Syncs billable and internal hours per designer from Timely. Enter your personal access token and account ID below.
+          </p>
+        </div>
+      </div>
+
+      {/* Credentials form */}
+      <div className="card">
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 16 }}>
+          API Credentials
+        </div>
+        <CredentialField
+          label="Personal Access Token"
+          value={token}
+          onChange={setToken}
+          placeholder="Paste your Timely personal access token…"
+          secret
+          hint="Settings → Account → API"
+        />
+        <CredentialField
+          label="Account ID"
+          value={accountId}
+          onChange={setAccountId}
+          placeholder="e.g. 123456"
+          hint="Found in your Timely account URL"
+        />
+        <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
+              background: saved ? 'var(--accent-green-dim)' : 'var(--accent-teal)',
+              color: saved ? 'var(--accent-green)' : '#0f1117',
+              border: saved ? '1px solid var(--accent-green)' : 'none',
+              borderRadius: 8, fontSize: 13, fontWeight: 600,
+              cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1,
+            }}
+          >
+            {saved ? <CheckCircle size={14} /> : <Save size={14} />}
+            {saved ? 'Saved!' : saving ? 'Saving…' : 'Save Credentials'}
+          </button>
+          <button
+            onClick={handleSync}
+            disabled={syncing || !isConnected}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
+              background: 'var(--bg-inner)', color: isConnected ? 'var(--text-secondary)' : 'var(--text-subtle)',
+              border: '1px solid var(--border)', borderRadius: 8, fontSize: 13, fontWeight: 500,
+              cursor: syncing || !isConnected ? 'not-allowed' : 'pointer',
+            }}
+          >
+            <RefreshCw size={14} style={{ animation: syncing ? 'spin 1s linear infinite' : 'none' }} />
+            {syncing ? 'Syncing…' : 'Sync Now'}
+          </button>
+        </div>
+        {lastSync && (
+          <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-subtle)' }}>
+            Last synced: {new Date(lastSync).toLocaleString()}
+          </div>
+        )}
+      </div>
+
+      {/* Sync result */}
+      {syncResult && (
+        <SyncResult result={syncResult} />
       )}
 
-      {activeTab === 'clickup' && (
-        <IntegrationPanel
-          title="ClickUp Integration"
-          description="Connect to ClickUp to track deadline performance. The app identifies tasks that moved to Review status after their due date."
-          icon={<CheckSquare size={24} color="var(--accent-violet)" />}
-          envVars={['VITE_CLICKUP_API_KEY']}
-          features={[
-            'Tracks tasks moved to Review after due date',
-            'Calculates days late per task',
-            'Surfaces attribution requests (Designer / Client / Out of Control)',
-            'Feeds into deadline performance score',
-          ]}
+      {/* What this does */}
+      <FeatureCard title="What This Sync Does" features={[
+        'Fetches all time entries from Timely and groups by designer + month',
+        'Calculates total, billable, and internal hours per month',
+        'Saves to monthly_hours_summary — used for utilization scoring',
+        'Re-running sync updates existing records (safe to run repeatedly)',
+        'Goes back through all available Timely history on first sync',
+      ]} />
+
+      <SetupGuide steps={[
+        'In Timely, go to Settings → Account → API and create a personal access token',
+        'Copy your Account ID from the URL (timelyapp.com/XXX)',
+        'Paste both above and click Save Credentials',
+        'Click Sync Now to pull all historical data',
+        'For automated hourly syncs, set up a Supabase Edge Function with a cron trigger',
+      ]} />
+    </div>
+  );
+}
+
+// ─── ClickUp Tab ───────────────────────────────────────────────────────────────
+
+function ClickUpTab() {
+  const [apiKey, setApiKey] = useState('');
+  const [teamId, setTeamId] = useState('');
+  const [lastSync, setLastSync] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<{ synced: number; errors: string[] } | null>(null);
+
+  useEffect(() => {
+    getAppSettings(['clickup_api_key', 'clickup_team_id', 'clickup_last_sync']).then(s => {
+      if (s.clickup_api_key) setApiKey(s.clickup_api_key);
+      if (s.clickup_team_id) setTeamId(s.clickup_team_id);
+      if (s.clickup_last_sync) setLastSync(s.clickup_last_sync);
+    });
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaved(false);
+    await Promise.all([
+      setAppSetting('clickup_api_key', apiKey),
+      setAppSetting('clickup_team_id', teamId),
+    ]);
+    setSaving(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
+  };
+
+  const handleSync = useCallback(async () => {
+    if (!apiKey || !teamId) return;
+    setSyncing(true);
+    setSyncResult(null);
+    const result = await syncClickUpData(apiKey, teamId);
+    setSyncResult(result);
+    setSyncing(false);
+    if (result.errors.length === 0) {
+      setLastSync(new Date().toISOString());
+    }
+  }, [apiKey, teamId]);
+
+  const isConnected = !!(apiKey && teamId);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="card" style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+        <div style={{ width: 44, height: 44, borderRadius: 10, background: 'var(--accent-violet-dim)', border: '1px solid var(--accent-violet)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <CheckSquare size={20} color="var(--accent-violet)" />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+            <h2 style={{ fontSize: 16, fontWeight: 600 }}>ClickUp Integration</h2>
+            <ConnectionBadge connected={isConnected} />
+          </div>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, margin: 0 }}>
+            Syncs task deadline data to track on-time delivery. Enter your personal API token and Workspace (Team) ID.
+          </p>
+        </div>
+      </div>
+
+      <div className="card">
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 16 }}>
+          API Credentials
+        </div>
+        <CredentialField
+          label="Personal API Token"
+          value={apiKey}
+          onChange={setApiKey}
+          placeholder="pk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          secret
+          hint="Settings → My Apps → API Token"
         />
+        <CredentialField
+          label="Workspace (Team) ID"
+          value={teamId}
+          onChange={setTeamId}
+          placeholder="e.g. 9012345678"
+          hint="app.clickup.com/XXXXXXXXXX/…"
+        />
+        <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
+              background: saved ? 'var(--accent-green-dim)' : 'var(--accent-violet)',
+              color: saved ? 'var(--accent-green)' : '#fff',
+              border: saved ? '1px solid var(--accent-green)' : 'none',
+              borderRadius: 8, fontSize: 13, fontWeight: 600,
+              cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1,
+            }}
+          >
+            {saved ? <CheckCircle size={14} /> : <Save size={14} />}
+            {saved ? 'Saved!' : saving ? 'Saving…' : 'Save Credentials'}
+          </button>
+          <button
+            onClick={handleSync}
+            disabled={syncing || !isConnected}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
+              background: 'var(--bg-inner)', color: isConnected ? 'var(--text-secondary)' : 'var(--text-subtle)',
+              border: '1px solid var(--border)', borderRadius: 8, fontSize: 13, fontWeight: 500,
+              cursor: syncing || !isConnected ? 'not-allowed' : 'pointer',
+            }}
+          >
+            <RefreshCw size={14} style={{ animation: syncing ? 'spin 1s linear infinite' : 'none' }} />
+            {syncing ? 'Syncing…' : 'Sync Now'}
+          </button>
+        </div>
+        {lastSync && (
+          <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-subtle)' }}>
+            Last synced: {new Date(lastSync).toLocaleString()}
+          </div>
+        )}
+      </div>
+
+      {syncResult && <SyncResult result={syncResult} />}
+
+      <FeatureCard title="What This Sync Does" features={[
+        'Fetches all tasks from your ClickUp workspace with due dates',
+        'Identifies tasks completed after their due date (late delivery)',
+        'Records days late and assignee for each late task',
+        'Saves to clickup_deadlines — used for deadline performance scoring',
+        'Attribution (Designer / Client / Out of Control) can be set from designer profiles',
+      ]} />
+
+      <SetupGuide steps={[
+        'In ClickUp, go to Settings → My Apps and create a personal API token',
+        'Find your Workspace ID in the URL: app.clickup.com/XXXXXXXXXX',
+        'Make sure all designers use their Steadfast email in ClickUp',
+        'Paste both credentials above and click Save Credentials',
+        'Click Sync Now to pull all historical task data',
+      ]} />
+    </div>
+  );
+}
+
+// ─── Shared sub-components ─────────────────────────────────────────────────────
+
+function ConnectionBadge({ connected }: { connected: boolean }) {
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 8px',
+      borderRadius: 20, fontSize: 11, fontWeight: 600,
+      background: connected ? 'var(--accent-teal-dim)' : 'var(--bg-inner)',
+      color: connected ? 'var(--accent-teal)' : 'var(--text-subtle)',
+      border: `1px solid ${connected ? 'var(--accent-teal)' : 'var(--border)'}`,
+    }}>
+      {connected ? <CheckCircle size={10} /> : <AlertCircle size={10} />}
+      {connected ? 'Credentials saved' : 'Not configured'}
+    </span>
+  );
+}
+
+function SyncResult({ result }: { result: { synced: number; errors: string[] } }) {
+  const success = result.errors.length === 0;
+  return (
+    <div style={{
+      padding: '14px 18px', borderRadius: 10,
+      background: success ? 'var(--accent-green-dim)' : 'var(--accent-red-dim)',
+      border: `1px solid ${success ? 'var(--accent-green)' : 'var(--accent-red)'}`,
+    }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: success ? 'var(--accent-green)' : 'var(--accent-red)', marginBottom: result.errors.length > 0 ? 8 : 0 }}>
+        {success ? `✓ Sync complete — ${result.synced} records updated` : `Sync finished with ${result.errors.length} error(s) · ${result.synced} records updated`}
+      </div>
+      {result.errors.length > 0 && (
+        <ul style={{ margin: 0, padding: '0 0 0 16px', fontSize: 12, color: 'var(--accent-red)' }}>
+          {result.errors.slice(0, 5).map((e, i) => <li key={i}>{e}</li>)}
+          {result.errors.length > 5 && <li>…and {result.errors.length - 5} more</li>}
+        </ul>
       )}
     </div>
   );
 }
 
-function IntegrationPanel({ title, description, icon, envVars, features }: {
-  title: string; description: string; icon: React.ReactNode;
-  envVars: string[]; features: string[];
-}) {
+function FeatureCard({ title, features }: { title: string; features: string[] }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <div className="card" style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
-        <div style={{ width: 48, height: 48, borderRadius: 12, background: 'var(--bg-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          {icon}
-        </div>
-        <div>
-          <h2 style={{ fontSize: 18, marginBottom: 6 }}>{title}</h2>
-          <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, margin: 0 }}>{description}</p>
-        </div>
+    <div className="card">
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12 }}>
+        {title}
       </div>
-
-      <div className="card">
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>Required Environment Variables</div>
-        {envVars.map(v => (
-          <div key={v} style={{ padding: '8px 12px', background: 'var(--bg-surface)', borderRadius: 6, fontFamily: 'DM Mono, monospace', fontSize: 12, color: 'var(--accent-teal)', marginBottom: 6 }}>{v}</div>
+      <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 7 }}>
+        {features.map(f => (
+          <li key={f} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, color: 'var(--text-muted)' }}>
+            <span style={{ color: 'var(--accent-teal)', flexShrink: 0 }}>✓</span>
+            {f}
+          </li>
         ))}
-        <p style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 10, margin: 0 }}>
-          Set these in your Netlify environment variables or local .env file.
-        </p>
-      </div>
+      </ul>
+    </div>
+  );
+}
 
-      <div className="card">
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>What This Integration Does</div>
-        <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {features.map(f => (
-            <li key={f} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, color: 'var(--text-muted)' }}>
-              <span style={{ color: 'var(--accent-teal)', flexShrink: 0, marginTop: 1 }}>✓</span>
-              {f}
-            </li>
-          ))}
-        </ul>
+function SetupGuide({ steps }: { steps: string[] }) {
+  return (
+    <div className="card" style={{ background: 'rgba(85,170,170,0.04)', border: '1px solid rgba(85,170,170,0.2)' }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent-teal)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12 }}>
+        Setup Guide
       </div>
-
-      <div className="card" style={{ background: 'var(--accent-amber-dim)', border: '1px solid var(--accent-amber)' }}>
-        <div style={{ fontSize: 13, color: 'var(--accent-amber)', fontWeight: 600, marginBottom: 6 }}>MVP Note</div>
-        <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6, margin: 0 }}>
-          Live sync is not implemented in the MVP. Data can be seeded directly into the Supabase database. 
-          Integration functions are defined in the codebase and ready for implementation.
-        </p>
-      </div>
+      <ol style={{ margin: 0, padding: '0 0 0 18px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {steps.map((s, i) => (
+          <li key={i} style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>{s}</li>
+        ))}
+      </ol>
     </div>
   );
 }

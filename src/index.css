@@ -1,27 +1,39 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Instrument+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 
 :root {
-  --bg-base: #0F1117;
-  --bg-surface: #1A1D27;
-  --bg-card: #1E2133;
-  --border: rgba(255,255,255,0.07);
+  /* Backgrounds — matched to Figma #2d333c body, #1e2228 cards */
+  --bg-base: #1a1e24;
+  --bg-body: #2d333c;
+  --bg-surface: #232830;
+  --bg-card: #1e2228;
+  --bg-inner: #252b33;
+
+  /* Borders */
+  --border: #3c434c;
+  --border-subtle: #33393f;
   --border-accent: rgba(255,255,255,0.12);
-  --text-primary: #F0EDE8;
-  --text-muted: #8B8FA8;
-  --text-subtle: #5A5F76;
-  --accent-teal: #2DD4BF;
-  --accent-teal-dim: rgba(45,212,191,0.12);
-  --accent-violet: #7C3AED;
-  --accent-violet-dim: rgba(124,58,237,0.12);
-  --accent-amber: #F59E0B;
-  --accent-amber-dim: rgba(245,158,11,0.12);
-  --accent-green: #10B981;
-  --accent-green-dim: rgba(16,185,129,0.12);
-  --accent-red: #EF4444;
-  --accent-red-dim: rgba(239,68,68,0.12);
-  --accent-blue: #3B82F6;
-  --accent-blue-dim: rgba(59,130,246,0.12);
+
+  /* Text */
+  --text-primary: #ffffff;
+  --text-secondary: #c8ccd1;
+  --text-muted: #8b929a;
+  --text-subtle: #555b63;
+
+  /* Accents — Figma palette */
+  --accent-teal: #55aaaa;
+  --accent-teal-dim: rgba(85,170,170,0.13);
+  --accent-teal-mid: rgba(85,170,170,0.27);
+  --accent-violet: #796f8e;
+  --accent-violet-dim: rgba(121,111,142,0.15);
+  --accent-amber: #b19a67;
+  --accent-amber-dim: rgba(177,154,103,0.15);
+  --accent-green: #4ade80;
+  --accent-green-dim: rgba(74,222,128,0.12);
+  --accent-red: #f87171;
+  --accent-red-dim: rgba(248,113,113,0.12);
+  --accent-blue: #60a5fa;
+  --accent-blue-dim: rgba(96,165,250,0.12);
 }
 
 *, *::before, *::after {
@@ -32,9 +44,9 @@
 
 html, body {
   height: 100%;
-  background-color: var(--bg-base);
+  background-color: var(--bg-body);
   color: var(--text-primary);
-  font-family: 'Instrument Sans', sans-serif;
+  font-family: 'Inter', sans-serif;
   font-size: 14px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
@@ -46,11 +58,12 @@ html, body {
 }
 
 h1, h2, h3 {
-  font-family: 'DM Serif Display', serif;
-  font-weight: 400;
+  font-family: 'Inter', sans-serif;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
-/* Scrollbar styles */
+/* Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -66,15 +79,21 @@ h1, h2, h3 {
   background: rgba(255,255,255,0.2);
 }
 
-/* Card base */
+/* Card */
 .card {
-  border-radius: 16px;
+  border-radius: 14px;
   border: 1px solid var(--border);
   background: var(--bg-card);
-  padding: 24px;
+  padding: 20px;
+}
+.card-inner {
+  border-radius: 10px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-inner);
+  padding: 14px;
 }
 
-/* Input base */
+/* Input */
 input[type="text"],
 input[type="email"],
 input[type="password"],
@@ -83,13 +102,13 @@ input[type="number"],
 input[type="date"],
 textarea,
 select {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-accent);
+  background: var(--bg-inner);
+  border: 1px solid var(--border);
   color: var(--text-primary);
   border-radius: 8px;
   padding: 8px 12px;
-  font-family: 'Instrument Sans', sans-serif;
-  font-size: 14px;
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
   outline: none;
   width: 100%;
   transition: border-color 0.15s;
@@ -107,15 +126,14 @@ select:focus {
 input::placeholder, textarea::placeholder {
   color: var(--text-subtle);
 }
-
 select option {
   background: var(--bg-surface);
   color: var(--text-primary);
 }
 
-/* Button base */
+/* Button */
 button {
-  font-family: 'Instrument Sans', sans-serif;
+  font-family: 'Inter', sans-serif;
   cursor: pointer;
 }
 
@@ -143,4 +161,21 @@ button {
   fill: var(--text-subtle);
   font-family: 'DM Mono', monospace;
   font-size: 11px;
+}
+
+/* Spin animation for sync buttons */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Track badge */
+.track-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  background: rgba(121,111,142,0.2);
+  color: var(--accent-violet);
 }

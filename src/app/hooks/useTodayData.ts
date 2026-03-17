@@ -47,18 +47,24 @@ export function useTodayData(): TodayData {
       getBonusRecords(),
       getPipRecords(),
     ]).then(([profiles, hours, deadlines, reviews, bonuses, pips]) => {
-      const designers = profiles.filter(p => p.isActive);
+      const safeProfiles = profiles ?? [];
+      const safeHours = hours ?? [];
+      const safeDeadlines = deadlines ?? [];
+      const safeReviews = reviews ?? [];
+      const safeBonuses = bonuses ?? [];
+      const safePips = pips ?? [];
+      const designers = safeProfiles.filter(p => p.isActive);
       const reflections: ReflectionEntry[] = []; // fetched separately if needed
       setData({
         designers,
-        monthlyHours: hours,
-        deadlines,
-        reviews,
-        bonuses,
-        pips,
-        teamHealth: getTeamHealth(designers, hours, deadlines),
-        attentionItems: getAttentionItems(designers, hours, deadlines, reviews, bonuses, pips, reflections),
-        comingUp: getComingUp(designers, reviews, bonuses, pips),
+        monthlyHours: safeHours,
+        deadlines: safeDeadlines,
+        reviews: safeReviews,
+        bonuses: safeBonuses,
+        pips: safePips,
+        teamHealth: getTeamHealth(designers, safeHours, safeDeadlines),
+        attentionItems: getAttentionItems(designers, safeHours, safeDeadlines, safeReviews, safeBonuses, safePips, reflections),
+        comingUp: getComingUp(designers, safeReviews, safeBonuses, safePips),
       });
     }).catch(e => setError(e.message)).finally(() => setLoading(false));
   }, [tick]);

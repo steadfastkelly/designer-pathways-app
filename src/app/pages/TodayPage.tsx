@@ -50,13 +50,13 @@ export function TodayPage() {
         <h2 style={{ fontSize: 18, fontWeight: 400, marginBottom: 12, color: 'var(--text-primary)' }}>
           Who Needs My Attention
         </h2>
-        {attentionItems.length === 0 ? (
+        {(attentionItems ?? []).length === 0 ? (
           <div className="card" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
             No immediate attention items — all looking good!
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {attentionItems.map((item) => (
+            {(attentionItems ?? []).map((item) => (
               <AttentionCard key={item.id} item={item} />
             ))}
           </div>
@@ -68,7 +68,7 @@ export function TodayPage() {
         <h2 style={{ fontSize: 18, fontWeight: 400, marginBottom: 12, color: 'var(--text-primary)' }}>
           Coming Up (Next 30 Days)
         </h2>
-        <ComingUpList items={comingUp} />
+        <ComingUpList items={comingUp ?? []} />
       </section>
     </div>
   );

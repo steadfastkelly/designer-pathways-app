@@ -82,7 +82,7 @@ export function getDesignerScore(
   monthlyHours: MonthlyHoursSummary[],
   deadlines: ClickupDeadline[],
 ): DesignerScore {
-  const designerHours = monthlyHours
+  const designerHours = (monthlyHours ?? [])
     .filter(h => h.designerId === designer.id)
     .sort((a, b) => b.year !== a.year ? b.year - a.year : b.month - a.month);
 
@@ -100,7 +100,7 @@ export function getDesignerScore(
   }
 
   // Deadlines: only designer-attributed late deadlines count against score
-  const designerDeadlines = deadlines.filter(d => d.designerId === designer.id);
+  const designerDeadlines = (deadlines ?? []).filter(d => d.designerId === designer.id);
   const attributedDeadlines = designerDeadlines.filter(d => d.attribution != null);
   const designerFaultLate = attributedDeadlines.filter(d => d.wasLate && d.attribution === 'designer').length;
   const totalAttributed = attributedDeadlines.length;

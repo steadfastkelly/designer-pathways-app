@@ -11,7 +11,8 @@ const TYPE_CONFIG = {
 };
 
 export function ComingUpList({ items }: { items: ComingUpItem[] }) {
-  if (items.length === 0) {
+  const safeItems = items ?? [];
+  if (safeItems.length === 0) {
     return (
       <div className="card">
         <p style={{ color: 'var(--text-muted)', fontSize: 14, textAlign: 'center', padding: '16px 0' }}>
@@ -23,7 +24,7 @@ export function ComingUpList({ items }: { items: ComingUpItem[] }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {items.map((item) => {
+      {safeItems.map((item) => {
         const { icon: Icon, color, bg } = TYPE_CONFIG[item.type] ?? TYPE_CONFIG.review;
         return (
           <div
