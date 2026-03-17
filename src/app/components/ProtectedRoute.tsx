@@ -1,4 +1,4 @@
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import type { UserRole } from '../types';
 
@@ -9,6 +9,7 @@ interface Props {
 
 export function ProtectedRoute({ children, allowedRoles }: Props) {
   const { effectiveRole, loading, session } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return (
@@ -18,7 +19,11 @@ export function ProtectedRoute({ children, allowedRoles }: Props) {
     );
   }
 
-  if (!session) return <Navigate to="/login" replace />;
+  // Preserve hash params (e.g. Supabase recovery tokens) when redirecting to login
+  if (!session) {
+    const hash = window.location.hash;
+    return <Navigate to={`/login${hash}`} replace state={{ from: location }} />;
+  }
   if (!effectiveRole || !allowedRoles.includes(effectiveRole)) {
     return <Navigate to="/unauthorized" replace />;
   }
