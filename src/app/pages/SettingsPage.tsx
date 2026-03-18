@@ -14,7 +14,9 @@ type TabId = 'profiles' | 'timely' | 'clickup';
 const S: React.CSSProperties = {};
 
 export function SettingsPage() {
-  const [activeTab, setActiveTab] = useState<TabId>('profiles');
+  const params = new URLSearchParams(window.location.search);
+  const isTimelyCallback = params.get('state') === 'timely' && !!params.get('code');
+  const [activeTab, setActiveTab] = useState<TabId>(isTimelyCallback ? 'timely' : 'profiles');
   const { members, loading } = useTeamData();
 
   const tabs = [
@@ -181,19 +183,38 @@ function TimelyTab() {
     if (code && state === 'timely') {
       window.history.replaceState({}, '', '/settings');
       setConnecting(true);
-      getAppSettings(['timely_client_id', 'timely_client_secret', 'timely_account_id']).then(async s => {
-        if (!s.timely_client_id || !s.timely_client_secret) {
-          setConnectError('Saved credentials not found. Please re-enter your Application ID and Secret and try connecting again.');
+
+      // Read credentials from sessionStorage (set by handleConnect before redirect)
+      // Fall back to DB if sessionStorage is empty
+      const stored = sessionStorage.getItem('timely_oauth_creds');
+      sessionStorage.removeItem('timely_oauth_creds');
+
+      const resolveCredentials = stored
+        ? Promise.resolve(JSON.parse(stored) as { client_id: string; client_secret: string; account_id: string })
+        : getAppSettings(['timely_client_id', 'timely_client_secret', 'timely_account_id']).then(s => ({
+            client_id: s.timely_client_id,
+            client_secret: s.timely_client_secret,
+            account_id: s.timely_account_id,
+          }));
+
+      resolveCredentials.then(async creds => {
+        if (!creds.client_id || !creds.client_secret) {
+          setConnectError('Credentials not found. Please re-enter your Application ID and Secret and try connecting again.');
           setConnecting(false);
           return;
         }
+        // Restore fields from what we have
+        setClientId(creds.client_id);
+        setClientSecret(creds.client_secret);
+        if (creds.account_id) setAccountId(creds.account_id);
+
         try {
           const res = await fetch('/.netlify/functions/timely-token', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              client_id: s.timely_client_id,
-              client_secret: s.timely_client_secret,
+              client_id: creds.client_id,
+              client_secret: creds.client_secret,
               code,
               redirect_uri: TIMELY_REDIRECT_URI,
             }),
@@ -201,10 +222,13 @@ function TimelyTab() {
           const data = await res.json();
           if (data.access_token) {
             setAccessToken(data.access_token);
-            setClientId(s.timely_client_id);
-            setClientSecret(s.timely_client_secret);
-            if (s.timely_account_id) setAccountId(s.timely_account_id);
-            await setAppSetting('timely_access_token', data.access_token);
+            // Persist everything to DB now that we have a token
+            await Promise.all([
+              setAppSetting('timely_client_id', creds.client_id),
+              setAppSetting('timely_client_secret', creds.client_secret),
+              setAppSetting('timely_account_id', creds.account_id ?? ''),
+              setAppSetting('timely_access_token', data.access_token),
+            ]);
           } else {
             setConnectError(`Timely did not return an access token. Response: ${JSON.stringify(data)}`);
           }
@@ -231,11 +255,12 @@ function TimelyTab() {
 
   const handleConnect = async () => {
     if (!clientId || !clientSecret || !accountId) return;
-    await Promise.all([
-      setAppSetting('timely_client_id', clientId),
-      setAppSetting('timely_client_secret', clientSecret),
-      setAppSetting('timely_account_id', accountId),
-    ]);
+    // Store credentials in sessionStorage so they survive the OAuth redirect
+    sessionStorage.setItem('timely_oauth_creds', JSON.stringify({
+      client_id: clientId,
+      client_secret: clientSecret,
+      account_id: accountId,
+    }));
     const authUrl = `https://api.timelyapp.com/1.1/oauth/authorize?response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(TIMELY_REDIRECT_URI)}&state=timely`;
     window.location.href = authUrl;
   };
