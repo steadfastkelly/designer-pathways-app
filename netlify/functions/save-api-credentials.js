@@ -26,33 +26,36 @@ const ENV_VAR_MAP = {
 };
 
 async function writeNetlifyEnvVar(siteId, token, key, value) {
-  // Try PATCH first (update existing), then POST (create new)
   const base = `https://api.netlify.com/api/v1/sites/${siteId}/env`;
   const headers = {
     Authorization: `Bearer ${token}`,
     'Content-Type': 'application/json',
   };
+  const payload = { key, values: [{ value, context: 'all' }] };
 
-  // PATCH updates an existing variable
+  // PATCH updates an existing variable — body must include key + values array
   const patchRes = await fetch(`${base}/${key}`, {
     method: 'PATCH',
     headers,
-    body: JSON.stringify({ value, context: 'all' }),
+    body: JSON.stringify(payload),
   });
 
   if (patchRes.ok) return { key, ok: true };
 
-  // If not found (404), create it
+  // If not found (404), create it with POST
   if (patchRes.status === 404) {
     const postRes = await fetch(base, {
       method: 'POST',
       headers,
-      body: JSON.stringify([{ key, values: [{ value, context: 'all' }] }]),
+      body: JSON.stringify([payload]),
     });
-    return { key, ok: postRes.ok, status: postRes.status };
+    if (postRes.ok) return { key, ok: true };
+    const postErr = await postRes.text().catch(() => '');
+    return { key, ok: false, status: postRes.status, error: postErr };
   }
 
-  return { key, ok: false, status: patchRes.status };
+  const patchErr = await patchRes.text().catch(() => '');
+  return { key, ok: false, status: patchRes.status, error: patchErr };
 }
 
 exports.handler = async (event) => {
@@ -98,9 +101,14 @@ exports.handler = async (event) => {
 
   const failed = results.filter(r => !r.ok && !r.skipped);
   if (failed.length > 0) {
+    console.error('[save-api-credentials] Netlify env var write failures:', JSON.stringify(failed));
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: 'Some env vars failed to save', failed }),
+      body: JSON.stringify({
+        error: 'Some env vars failed to save',
+        failed,
+        hint: 'Check that NETLIFY_ACCESS_TOKEN has write:env_vars scope and NETLIFY_SITE_ID is correct',
+      }),
     };
   }
 
