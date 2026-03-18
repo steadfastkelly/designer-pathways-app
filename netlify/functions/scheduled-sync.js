@@ -175,33 +175,35 @@ exports.handler = async () => {
     return { statusCode: 500, body: e.message };
   }
 
-  const settings = await getSettings(supabase, [
-    'timely_access_token', 'timely_account_id',
-    'clickup_api_key', 'clickup_team_id',
-  ]);
+  // Credentials come from Netlify env vars (set via save-api-credentials function).
+  // This ensures they persist across deploys and are never read from Supabase at sync time.
+  const timelyToken   = process.env.TIMELY_ACCESS_TOKEN;
+  const timelyAccount = process.env.TIMELY_ACCOUNT_ID;
+  const clickupKey    = process.env.CLICKUP_API_KEY;
+  const clickupTeam   = process.env.CLICKUP_TEAM_ID;
 
   const syncLog = { timely: null, clickup: null, errors: [] };
 
-  if (settings.timely_access_token && settings.timely_account_id) {
+  if (timelyToken && timelyAccount) {
     try {
-      syncLog.timely = await syncTimely(supabase, settings.timely_access_token, settings.timely_account_id);
+      syncLog.timely = await syncTimely(supabase, timelyToken, timelyAccount);
       console.log('Timely sync:', syncLog.timely.synced, 'records,', syncLog.timely.errors.length, 'errors');
     } catch (e) {
       syncLog.errors.push(`Timely sync failed: ${e.message}`);
     }
   } else {
-    syncLog.errors.push('Timely credentials not configured — skipping');
+    syncLog.errors.push('Timely credentials not configured (TIMELY_ACCESS_TOKEN / TIMELY_ACCOUNT_ID) — skipping');
   }
 
-  if (settings.clickup_api_key && settings.clickup_team_id) {
+  if (clickupKey && clickupTeam) {
     try {
-      syncLog.clickup = await syncClickUp(supabase, settings.clickup_api_key, settings.clickup_team_id);
+      syncLog.clickup = await syncClickUp(supabase, clickupKey, clickupTeam);
       console.log('ClickUp sync:', syncLog.clickup.synced, 'records,', syncLog.clickup.errors.length, 'errors');
     } catch (e) {
       syncLog.errors.push(`ClickUp sync failed: ${e.message}`);
     }
   } else {
-    syncLog.errors.push('ClickUp credentials not configured — skipping');
+    syncLog.errors.push('ClickUp credentials not configured (CLICKUP_API_KEY / CLICKUP_TEAM_ID) — skipping');
   }
 
   return { statusCode: 200, body: JSON.stringify(syncLog) };

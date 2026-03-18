@@ -13,8 +13,21 @@ type TabId = 'profiles' | 'timely' | 'clickup';
 
 const S: React.CSSProperties = {};
 
-// Server-side setting save — bypasses RLS until profiles are seeded.
-// Falls back to client-side setAppSetting if the function is unavailable.
+// Saves credentials to Netlify env vars (persist across deploys, used by scheduled sync)
+// and mirrors them to Supabase app_settings for the UI to read back.
+async function saveApiCredentials(service: string, credentials: Record<string, string>): Promise<void> {
+  const res = await fetch('/.netlify/functions/save-api-credentials', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ service, credentials }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error ?? `Save failed: ${res.status}`);
+  }
+}
+
+// Legacy single-key save — used only for non-credential settings (e.g. last_sync timestamps).
 async function saveSetting(key: string, value: string): Promise<void> {
   try {
     const res = await fetch('/.netlify/functions/save-setting', {
@@ -258,12 +271,14 @@ function TimelyTab() {
         if (creds.account_id) setAccountId(creds.account_id);
 
         try {
+          // timely-token handles both exchange AND persistence (Netlify env vars + Supabase)
           const res = await fetch('/.netlify/functions/timely-token', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               client_id: creds.client_id,
               client_secret: creds.client_secret,
+              account_id: creds.account_id,
               code,
               redirect_uri: TIMELY_REDIRECT_URI,
             }),
@@ -271,13 +286,6 @@ function TimelyTab() {
           const data = await res.json();
           if (data.access_token) {
             setAccessToken(data.access_token);
-            // Persist everything to DB now that we have a token
-            await Promise.all([
-              saveSetting('timely_client_id', creds.client_id),
-              saveSetting('timely_client_secret', creds.client_secret),
-              saveSetting('timely_account_id', creds.account_id ?? ''),
-              saveSetting('timely_access_token', data.access_token),
-            ]);
           } else {
             setConnectError(`Timely did not return an access token. Response: ${JSON.stringify(data)}`);
           }
@@ -292,14 +300,18 @@ function TimelyTab() {
   const handleSave = async () => {
     setSaving(true);
     setSaved(false);
-    await Promise.all([
-      saveSetting('timely_client_id', clientId),
-      saveSetting('timely_client_secret', clientSecret),
-      saveSetting('timely_account_id', accountId),
-    ]);
+    try {
+      await saveApiCredentials('timely', {
+        client_id: clientId,
+        client_secret: clientSecret,
+        account_id: accountId,
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (e) {
+      setConnectError(`Save failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
     setSaving(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
   };
 
   const handleConnect = async () => {
@@ -326,7 +338,7 @@ function TimelyTab() {
 
   const handleDisconnect = async () => {
     setAccessToken('');
-    await saveSetting('timely_access_token', '');
+    await saveApiCredentials('timely', { access_token: '' }).catch(() => saveSetting('timely_access_token', ''));
   };
 
   const isConfigured = !!(clientId && clientSecret && accountId);
@@ -495,16 +507,20 @@ function ClickUpTab() {
     });
   }, []);
 
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   const handleSave = async () => {
     setSaving(true);
     setSaved(false);
-    await Promise.all([
-      saveSetting('clickup_api_key', apiKey),
-      saveSetting('clickup_team_id', teamId),
-    ]);
+    setSaveError(null);
+    try {
+      await saveApiCredentials('clickup', { api_key: apiKey, team_id: teamId });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (e) {
+      setSaveError(`Save failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
     setSaving(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
   };
 
   const handleSync = useCallback(async () => {
@@ -587,6 +603,9 @@ function ClickUpTab() {
             {syncing ? 'Syncing…' : 'Sync Now'}
           </button>
         </div>
+        {saveError && (
+          <div style={{ marginTop: 10, fontSize: 12, color: 'var(--accent-red)' }}>{saveError}</div>
+        )}
         {lastSync && (
           <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-subtle)' }}>
             Last synced: {new Date(lastSync).toLocaleString()}
