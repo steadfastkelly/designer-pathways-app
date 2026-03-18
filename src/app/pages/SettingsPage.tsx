@@ -13,6 +13,21 @@ type TabId = 'profiles' | 'timely' | 'clickup';
 
 const S: React.CSSProperties = {};
 
+// Server-side setting save — bypasses RLS until profiles are seeded.
+// Falls back to client-side setAppSetting if the function is unavailable.
+async function saveSetting(key: string, value: string): Promise<void> {
+  try {
+    const res = await fetch('/.netlify/functions/save-setting', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, value }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+  } catch {
+    await setAppSetting(key, value);
+  }
+}
+
 export function SettingsPage() {
   const params = new URLSearchParams(window.location.search);
   const isTimelyCallback = params.get('state') === 'timely' && !!params.get('code');
@@ -69,12 +84,46 @@ export function SettingsPage() {
 // ─── Profiles Tab ──────────────────────────────────────────────────────────────
 
 function ProfilesTab({ members, loading }: { members: ReturnType<typeof useTeamData>['members']; loading: boolean }) {
+  const [seeding, setSeeding] = useState(false);
+  const [seedResult, setSeedResult] = useState<{ seeded: string[]; errors: string[] } | null>(null);
+
+  const handleSeedUsers = async () => {
+    setSeeding(true);
+    setSeedResult(null);
+    try {
+      const res = await fetch('/.netlify/functions/seed-users', { method: 'POST' });
+      const data = await res.json();
+      setSeedResult(data);
+      if (data.seeded?.length > 0) window.location.reload();
+    } catch (e) {
+      setSeedResult({ seeded: [], errors: [`Seed failed: ${e instanceof Error ? e.message : String(e)}`] });
+    }
+    setSeeding(false);
+  };
+
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <h2 style={{ fontSize: 16, fontWeight: 600 }}>Designer Profiles</h2>
-        <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>{members.length} active designers</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>{members.length} active designers</div>
+          {members.length === 0 && (
+            <button
+              onClick={handleSeedUsers}
+              disabled={seeding}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', background: 'var(--accent-teal)', color: '#0f1117', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: seeding ? 'not-allowed' : 'pointer', opacity: seeding ? 0.7 : 1 }}
+            >
+              {seeding ? <><RefreshCw size={12} style={{ animation: 'spin 1s linear infinite' }} /> Seeding…</> : 'Seed Team Data'}
+            </button>
+          )}
+        </div>
       </div>
+      {seedResult && (
+        <div style={{ marginBottom: 16, padding: '12px 16px', borderRadius: 10, background: seedResult.errors.length ? 'var(--accent-red-dim)' : 'var(--accent-teal-dim)', border: `1px solid ${seedResult.errors.length ? 'var(--accent-red)' : 'var(--accent-teal)'}`, fontSize: 12 }}>
+          {seedResult.seeded.length > 0 && <div style={{ color: 'var(--accent-teal)', marginBottom: 4 }}>Created: {seedResult.seeded.join(', ')}</div>}
+          {seedResult.errors.map((e, i) => <div key={i} style={{ color: 'var(--accent-red)' }}>{e}</div>)}
+        </div>
+      )}
       {loading ? (
         <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Loading…</div>
       ) : (
@@ -224,10 +273,10 @@ function TimelyTab() {
             setAccessToken(data.access_token);
             // Persist everything to DB now that we have a token
             await Promise.all([
-              setAppSetting('timely_client_id', creds.client_id),
-              setAppSetting('timely_client_secret', creds.client_secret),
-              setAppSetting('timely_account_id', creds.account_id ?? ''),
-              setAppSetting('timely_access_token', data.access_token),
+              saveSetting('timely_client_id', creds.client_id),
+              saveSetting('timely_client_secret', creds.client_secret),
+              saveSetting('timely_account_id', creds.account_id ?? ''),
+              saveSetting('timely_access_token', data.access_token),
             ]);
           } else {
             setConnectError(`Timely did not return an access token. Response: ${JSON.stringify(data)}`);
@@ -244,9 +293,9 @@ function TimelyTab() {
     setSaving(true);
     setSaved(false);
     await Promise.all([
-      setAppSetting('timely_client_id', clientId),
-      setAppSetting('timely_client_secret', clientSecret),
-      setAppSetting('timely_account_id', accountId),
+      saveSetting('timely_client_id', clientId),
+      saveSetting('timely_client_secret', clientSecret),
+      saveSetting('timely_account_id', accountId),
     ]);
     setSaving(false);
     setSaved(true);
@@ -277,7 +326,7 @@ function TimelyTab() {
 
   const handleDisconnect = async () => {
     setAccessToken('');
-    await setAppSetting('timely_access_token', '');
+    await saveSetting('timely_access_token', '');
   };
 
   const isConfigured = !!(clientId && clientSecret && accountId);
@@ -450,8 +499,8 @@ function ClickUpTab() {
     setSaving(true);
     setSaved(false);
     await Promise.all([
-      setAppSetting('clickup_api_key', apiKey),
-      setAppSetting('clickup_team_id', teamId),
+      saveSetting('clickup_api_key', apiKey),
+      saveSetting('clickup_team_id', teamId),
     ]);
     setSaving(false);
     setSaved(true);
