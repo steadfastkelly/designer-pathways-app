@@ -9,28 +9,35 @@
 --
 -- This migration is idempotent. If the UUIDs already match it simply
 -- re-confirms role = 'admin' and exits.
+--
+-- NOTE: looks up the old profile by its UUID (from 006_set_admin_role.sql)
+-- rather than by email, because the live profiles table has no email column.
 
 DO $$
 DECLARE
   v_auth_id  UUID;
-  v_old_id   UUID;
+  v_old_id   UUID := 'c3c2b02f-5c81-4762-9e7d-54cd9a1ab2b0'; -- hardcoded in 006
 BEGIN
-  SELECT id INTO v_auth_id FROM auth.users        WHERE email = 'kelly@steadfast.design';
-  SELECT id INTO v_old_id  FROM public.profiles   WHERE email = 'kelly@steadfast.design';
+  -- Get Kelly's real auth UUID from the auth schema (always has email).
+  SELECT id INTO v_auth_id FROM auth.users WHERE email = 'kelly@steadfast.design';
 
   IF v_auth_id IS NULL THEN
     RAISE EXCEPTION 'No auth.users row found for kelly@steadfast.design — cannot fix';
   END IF;
 
-  IF v_old_id IS NULL THEN
-    RAISE EXCEPTION 'No profiles row found for kelly@steadfast.design — cannot fix';
+  -- Case 1: Profile already exists at the correct auth UUID → just ensure role.
+  IF EXISTS (SELECT 1 FROM public.profiles WHERE id = v_auth_id) THEN
+    UPDATE public.profiles SET role = 'admin' WHERE id = v_auth_id;
+    RAISE NOTICE 'Profile already at correct UUID (%). Ensured role = admin.', v_auth_id;
+    RETURN;
   END IF;
 
-  IF v_auth_id = v_old_id THEN
-    -- UUIDs already match; just guarantee role is correct.
-    UPDATE public.profiles SET role = 'admin' WHERE id = v_auth_id;
-    RAISE NOTICE 'UUIDs already match (%). Ensured role = admin.', v_auth_id;
-    RETURN;
+  -- Case 2: No profile at the correct UUID. Check for the old hardcoded one.
+  IF NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = v_old_id) THEN
+    RAISE EXCEPTION
+      'No profile found at auth UUID (%) or old hardcoded UUID (%). '
+      'Run: SELECT id, role FROM public.profiles LIMIT 20; to inspect.',
+      v_auth_id, v_old_id;
   END IF;
 
   -- UUIDs differ: update all child-table FK references BEFORE touching
