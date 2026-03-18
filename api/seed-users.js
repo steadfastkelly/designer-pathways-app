@@ -241,10 +241,24 @@ export default async function handler(req, res) {
         userId = authData.user.id;
       }
 
-      const { error: profileError } = await supabase
+      let { error: profileError } = await supabase
         .from('profiles')
         .upsert({ id: userId, ...user.profile }, { onConflict: 'id' });
-      if (profileError) { errors.push(`${user.email}: profile — ${profileError.message}`); continue; }
+
+      if (profileError) {
+        // Email unique-constraint violation means a profile already exists with
+        // this email but a different UUID (UUID mismatch). Update by email so
+        // role and other fields stay current. The profiles.id mismatch must be
+        // fixed by running supabase/migrations/007_fix_kelly_uuid.sql.
+        const { error: updateError } = await supabase
+          .from('profiles')
+          .update(user.profile)
+          .eq('email', user.email);
+        if (updateError) {
+          errors.push(`${user.email}: profile — ${updateError.message}`); continue;
+        }
+        errors.push(`${user.email}: WARNING — UUID mismatch (profiles.id ≠ auth.users.id). Profile fields updated by email. Run migration 007_fix_kelly_uuid.sql in Supabase to fix RLS.`);
+      }
 
       for (const comp of (user.compensation ?? [])) {
         const { error: compError } = await supabase
