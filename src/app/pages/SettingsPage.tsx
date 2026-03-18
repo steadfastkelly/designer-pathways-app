@@ -5,7 +5,8 @@ import { Link } from 'react-router-dom';
 import { Avatar } from '../components/team/DesignerCard';
 import { PATHWAY_LEVEL_LABELS } from '../types';
 import {
-  getAppSettings, setAppSetting,
+  getAppSettings,
+  getApiCredentials, upsertApiCredentials,
   syncTimelyData, syncClickUpData,
 } from '../lib/api';
 
@@ -13,33 +14,6 @@ type TabId = 'profiles' | 'timely' | 'clickup';
 
 const S: React.CSSProperties = {};
 
-// Saves credentials to Netlify env vars (persist across deploys, used by scheduled sync)
-// and mirrors them to Supabase app_settings for the UI to read back.
-async function saveApiCredentials(service: string, credentials: Record<string, string>): Promise<void> {
-  const res = await fetch('/.netlify/functions/save-api-credentials', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ service, credentials }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error ?? `Save failed: ${res.status}`);
-  }
-}
-
-// Legacy single-key save — used only for non-credential settings (e.g. last_sync timestamps).
-async function saveSetting(key: string, value: string): Promise<void> {
-  try {
-    const res = await fetch('/.netlify/functions/save-setting', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, value }),
-    });
-    if (!res.ok) throw new Error(await res.text());
-  } catch {
-    await setAppSetting(key, value);
-  }
-}
 
 export function SettingsPage() {
   const params = new URLSearchParams(window.location.search);
@@ -226,13 +200,16 @@ function TimelyTab() {
   const [connectError, setConnectError] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<{ synced: number; errors: string[] } | null>(null);
 
-  // Load saved settings
+  // Load saved credentials from api_credentials table
   useEffect(() => {
-    getAppSettings(['timely_client_id', 'timely_client_secret', 'timely_account_id', 'timely_access_token', 'timely_last_sync']).then(s => {
-      if (s.timely_client_id) setClientId(s.timely_client_id);
-      if (s.timely_client_secret) setClientSecret(s.timely_client_secret);
-      if (s.timely_account_id) setAccountId(s.timely_account_id);
-      if (s.timely_access_token) setAccessToken(s.timely_access_token);
+    getApiCredentials('timely').then(creds => {
+      if (!creds) return;
+      if (creds.app_id) setClientId(creds.app_id);
+      if (creds.app_secret) setClientSecret(creds.app_secret);
+      if (creds.account_id) setAccountId(creds.account_id);
+      if (creds.access_token) setAccessToken(creds.access_token);
+    });
+    getAppSettings(['timely_last_sync']).then(s => {
       if (s.timely_last_sync) setLastSync(s.timely_last_sync);
     });
   }, []);
@@ -253,10 +230,10 @@ function TimelyTab() {
 
       const resolveCredentials = stored
         ? Promise.resolve(JSON.parse(stored) as { client_id: string; client_secret: string; account_id: string })
-        : getAppSettings(['timely_client_id', 'timely_client_secret', 'timely_account_id']).then(s => ({
-            client_id: s.timely_client_id,
-            client_secret: s.timely_client_secret,
-            account_id: s.timely_account_id,
+        : getApiCredentials('timely').then(creds => ({
+            client_id: creds?.app_id ?? '',
+            client_secret: creds?.app_secret ?? '',
+            account_id: creds?.account_id ?? '',
           }));
 
       resolveCredentials.then(async creds => {
@@ -286,6 +263,7 @@ function TimelyTab() {
           const data = await res.json();
           if (data.access_token) {
             setAccessToken(data.access_token);
+            // timely-token already persisted to api_credentials; update local state only
           } else {
             setConnectError(`Timely did not return an access token. Response: ${JSON.stringify(data)}`);
           }
@@ -300,16 +278,18 @@ function TimelyTab() {
   const handleSave = async () => {
     setSaving(true);
     setSaved(false);
-    try {
-      await saveApiCredentials('timely', {
-        client_id: clientId,
-        client_secret: clientSecret,
-        account_id: accountId,
-      });
+    const updates: Record<string, string> = {
+      app_id: clientId,
+      app_secret: clientSecret,
+      account_id: accountId,
+    };
+    if (accessToken) updates.access_token = accessToken;
+    const ok = await upsertApiCredentials('timely', updates);
+    if (ok) {
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
-    } catch (e) {
-      setConnectError(`Save failed: ${e instanceof Error ? e.message : String(e)}`);
+    } else {
+      setConnectError('Save failed — make sure your profile has admin role in Supabase.');
     }
     setSaving(false);
   };
@@ -338,7 +318,7 @@ function TimelyTab() {
 
   const handleDisconnect = async () => {
     setAccessToken('');
-    await saveApiCredentials('timely', { access_token: '' }).catch(() => saveSetting('timely_access_token', ''));
+    await upsertApiCredentials('timely', { access_token: '' });
   };
 
   const isConfigured = !!(clientId && clientSecret && accountId);
@@ -500,9 +480,12 @@ function ClickUpTab() {
   const [syncResult, setSyncResult] = useState<{ synced: number; errors: string[] } | null>(null);
 
   useEffect(() => {
-    getAppSettings(['clickup_api_key', 'clickup_team_id', 'clickup_last_sync']).then(s => {
-      if (s.clickup_api_key) setApiKey(s.clickup_api_key);
-      if (s.clickup_team_id) setTeamId(s.clickup_team_id);
+    getApiCredentials('clickup').then(creds => {
+      if (!creds) return;
+      if (creds.api_key) setApiKey(creds.api_key);
+      if (creds.team_id) setTeamId(creds.team_id);
+    });
+    getAppSettings(['clickup_last_sync']).then(s => {
       if (s.clickup_last_sync) setLastSync(s.clickup_last_sync);
     });
   }, []);
@@ -513,12 +496,12 @@ function ClickUpTab() {
     setSaving(true);
     setSaved(false);
     setSaveError(null);
-    try {
-      await saveApiCredentials('clickup', { api_key: apiKey, team_id: teamId });
+    const ok = await upsertApiCredentials('clickup', { api_key: apiKey, team_id: teamId });
+    if (ok) {
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
-    } catch (e) {
-      setSaveError(`Save failed: ${e instanceof Error ? e.message : String(e)}`);
+    } else {
+      setSaveError('Save failed — make sure your profile has admin role in Supabase.');
     }
     setSaving(false);
   };

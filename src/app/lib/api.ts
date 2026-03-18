@@ -18,7 +18,7 @@ export async function getProfile(userId: string): Promise<Profile | null> {
     .from('profiles')
     .select('*')
     .eq('id', userId)
-    .single();
+    .maybeSingle();
   if (error || !data) return null;
   return mapProfile(data);
 }
@@ -310,9 +310,45 @@ export async function getAppSetting(key: string): Promise<string | null> {
     .from('app_settings')
     .select('value')
     .eq('key', key)
-    .single();
+    .maybeSingle();
   if (error || !data) return null;
   return data.value;
+}
+
+// ─── API Credentials ───────────────────────────────────────────────────────────
+// Stores Timely + ClickUp credentials in api_credentials table (admin-only, RLS).
+
+export async function getApiCredentials(service: string): Promise<Record<string, string> | null> {
+  const { data, error } = await supabase
+    .from('api_credentials')
+    .select('credentials, is_configured')
+    .eq('service', service)
+    .maybeSingle();
+  if (error || !data || !data.is_configured) return null;
+  return data.credentials as Record<string, string>;
+}
+
+export async function upsertApiCredentials(
+  service: string,
+  updates: Record<string, string>,
+): Promise<boolean> {
+  // Read existing credentials first so we merge rather than overwrite
+  const { data: existing } = await supabase
+    .from('api_credentials')
+    .select('credentials')
+    .eq('service', service)
+    .maybeSingle();
+
+  const merged = { ...(existing?.credentials as Record<string, string> ?? {}), ...updates };
+
+  const { error } = await supabase
+    .from('api_credentials')
+    .upsert(
+      { service, credentials: merged, is_configured: true, updated_at: new Date().toISOString() },
+      { onConflict: 'service' },
+    );
+  if (error) console.error('upsertApiCredentials error:', error);
+  return !error;
 }
 
 export async function getAppSettings(keys: string[]): Promise<Record<string, string>> {

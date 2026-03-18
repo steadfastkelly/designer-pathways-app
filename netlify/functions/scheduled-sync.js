@@ -166,6 +166,17 @@ async function syncClickUp(supabase, apiKey, teamId) {
   return { synced, errors };
 }
 
+async function getApiCreds(supabase, service) {
+  const { data, error } = await supabase
+    .from('api_credentials')
+    .select('credentials')
+    .eq('service', service)
+    .eq('is_configured', true)
+    .maybeSingle();
+  if (error) console.error(`scheduled-sync: getApiCreds(${service}) error:`, error.message);
+  return data?.credentials ?? null;
+}
+
 exports.handler = async () => {
   let supabase;
   try {
@@ -175,12 +186,16 @@ exports.handler = async () => {
     return { statusCode: 500, body: e.message };
   }
 
-  // Credentials come from Netlify env vars (set via save-api-credentials function).
-  // This ensures they persist across deploys and are never read from Supabase at sync time.
-  const timelyToken   = process.env.TIMELY_ACCESS_TOKEN;
-  const timelyAccount = process.env.TIMELY_ACCOUNT_ID;
-  const clickupKey    = process.env.CLICKUP_API_KEY;
-  const clickupTeam   = process.env.CLICKUP_TEAM_ID;
+  // Read credentials from Supabase api_credentials table (service role bypasses RLS).
+  const [timelyCreds, clickupCreds] = await Promise.all([
+    getApiCreds(supabase, 'timely'),
+    getApiCreds(supabase, 'clickup'),
+  ]);
+
+  const timelyToken   = timelyCreds?.access_token;
+  const timelyAccount = timelyCreds?.account_id;
+  const clickupKey    = clickupCreds?.api_key;
+  const clickupTeam   = clickupCreds?.team_id;
 
   const syncLog = { timely: null, clickup: null, errors: [] };
 
@@ -192,7 +207,7 @@ exports.handler = async () => {
       syncLog.errors.push(`Timely sync failed: ${e.message}`);
     }
   } else {
-    syncLog.errors.push('Timely credentials not configured (TIMELY_ACCESS_TOKEN / TIMELY_ACCOUNT_ID) — skipping');
+    syncLog.errors.push('Timely credentials not configured in api_credentials — skipping');
   }
 
   if (clickupKey && clickupTeam) {
@@ -203,7 +218,7 @@ exports.handler = async () => {
       syncLog.errors.push(`ClickUp sync failed: ${e.message}`);
     }
   } else {
-    syncLog.errors.push('ClickUp credentials not configured (CLICKUP_API_KEY / CLICKUP_TEAM_ID) — skipping');
+    syncLog.errors.push('ClickUp credentials not configured in api_credentials — skipping');
   }
 
   return { statusCode: 200, body: JSON.stringify(syncLog) };
