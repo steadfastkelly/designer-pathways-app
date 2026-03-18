@@ -4,14 +4,42 @@
 
 import { createClient } from '@supabase/supabase-js';
 
+// Safely parse req.body regardless of whether Vercel auto-parsed it.
+// Vercel Node runtime normally parses application/json bodies, but this
+// guards against runtimes that pass a raw Buffer or undefined.
+async function parseBody(req) {
+  if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
+    return req.body; // already parsed by Vercel
+  }
+  return new Promise((resolve, reject) => {
+    let raw = '';
+    req.on('data', (chunk) => { raw += chunk; });
+    req.on('end', () => {
+      try { resolve(raw ? JSON.parse(raw) : {}); }
+      catch { reject(new Error(`Request body is not valid JSON: ${raw.slice(0, 100)}`)); }
+    });
+    req.on('error', reject);
+  });
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
-    return res.status(405).send('Method Not Allowed');
+    return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
-  const { code, client_id, client_secret, redirect_uri, account_id } = req.body ?? {};
+  let body;
+  try {
+    body = await parseBody(req);
+  } catch (e) {
+    return res.status(400).json({ error: `Bad request body: ${e.message}` });
+  }
+
+  const { code, client_id, client_secret, redirect_uri, account_id } = body ?? {};
   if (!code || !client_id || !client_secret || !redirect_uri) {
-    return res.status(400).json({ error: 'Missing required fields' });
+    return res.status(400).json({
+      error: 'Missing required fields',
+      received: { code: !!code, client_id: !!client_id, client_secret: !!client_secret, redirect_uri: !!redirect_uri },
+    });
   }
 
   try {
@@ -35,7 +63,9 @@ export default async function handler(req, res) {
     if (data.access_token) {
       const supabaseUrl = process.env.VITE_SUPABASE_URL;
       const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-      if (supabaseUrl && supabaseKey) {
+      if (!supabaseUrl || !supabaseKey) {
+        console.error('timely-token: SUPABASE_SERVICE_ROLE_KEY or VITE_SUPABASE_URL not set — token exchange succeeded but credentials NOT persisted');
+      } else {
         const supabase = createClient(supabaseUrl, supabaseKey, {
           auth: { autoRefreshToken: false, persistSession: false },
         });

@@ -79,7 +79,16 @@ function ProfilesTab({ members, loading }: { members: ReturnType<typeof useTeamD
     setSeedResult(null);
     try {
       const res = await fetch('/api/seed-users', { method: 'POST' });
-      const data = await res.json();
+      const text = await res.text();
+      if (!text.trim()) {
+        throw new Error(`Empty response from /api/seed-users (HTTP ${res.status}). Check that SUPABASE_SERVICE_ROLE_KEY is set in Vercel environment variables.`);
+      }
+      let data: { seeded: string[]; errors: string[] };
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(`Non-JSON response from /api/seed-users (HTTP ${res.status}): ${text.slice(0, 300)}`);
+      }
       setSeedResult(data);
       if (data.seeded?.length > 0) window.location.reload();
     } catch (e) {

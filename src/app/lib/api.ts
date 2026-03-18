@@ -407,17 +407,31 @@ export async function syncTimelyData(
     });
 
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }));
-      errors.push(`Timely API error: ${res.status} ${err.error ?? res.statusText}`);
+      const errText = await res.text().catch(() => res.statusText);
+      let errMsg = res.statusText;
+      try { errMsg = (JSON.parse(errText) as { error?: string }).error ?? errMsg; } catch { errMsg = errText.slice(0, 200); }
+      errors.push(`Timely API error: ${res.status} ${errMsg}`);
       return { synced, errors };
     }
 
-    const events: TimelySyncResult[] = await res.json();
-    if (!Array.isArray(events)) {
-      errors.push('Unexpected Timely API response format');
+    const eventsText = await res.text();
+    if (!eventsText.trim()) {
+      errors.push(`Empty response from /api/timely-events (HTTP ${res.status}). Check SUPABASE_SERVICE_ROLE_KEY in Vercel.`);
       return { synced, errors };
     }
-
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let events: any[];
+    try {
+      const parsed = JSON.parse(eventsText);
+      events = Array.isArray(parsed) ? parsed : [];
+      if (!Array.isArray(parsed)) {
+        errors.push(`Unexpected Timely API response format: ${eventsText.slice(0, 200)}`);
+        return { synced, errors };
+      }
+    } catch {
+      errors.push(`Non-JSON response from /api/timely-events: ${eventsText.slice(0, 200)}`);
+      return { synced, errors };
+    }
     // Group events by user + year + month
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const grouped: Record<string, { userId: string; email: string; year: number; month: number; totalHours: number; billableHours: number; internalHours: number }> = {};
@@ -510,11 +524,18 @@ export async function syncClickUpData(
       );
 
       if (!res.ok) {
-        errors.push(`ClickUp API error: ${res.status} ${res.statusText}`);
+        const errText = await res.text().catch(() => res.statusText);
+        errors.push(`ClickUp API error: ${res.status} — ${errText.slice(0, 200)}`);
         break;
       }
 
-      const json = await res.json();
+      const bodyText = await res.text();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let json: any;
+      try { json = JSON.parse(bodyText); } catch {
+        errors.push(`ClickUp returned non-JSON on page ${page}: ${bodyText.slice(0, 200)}`);
+        break;
+      }
       const tasks = json.tasks ?? [];
       allTasks.push(...tasks);
       hasMore = tasks.length === 100;
