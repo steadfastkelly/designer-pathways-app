@@ -248,7 +248,7 @@ function TimelyTab() {
         if (creds.account_id) setAccountId(creds.account_id);
 
         try {
-          // timely-token handles both exchange AND persistence (Netlify env vars + Supabase)
+          // timely-token handles both exchange AND persistence (Supabase api_credentials table)
           const res = await fetch('/api/timely-token', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
