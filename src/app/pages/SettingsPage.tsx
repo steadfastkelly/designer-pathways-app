@@ -260,9 +260,18 @@ function TimelyTab() {
               redirect_uri: TIMELY_REDIRECT_URI,
             }),
           });
-          const data = await res.json();
+          const rawText = await res.text();
+          if (!rawText.trim()) {
+            throw new Error(`Empty response from token exchange (HTTP ${res.status})`);
+          }
+          let data: Record<string, unknown>;
+          try {
+            data = JSON.parse(rawText);
+          } catch {
+            throw new Error(`Token exchange returned non-JSON (HTTP ${res.status}): ${rawText.slice(0, 200)}`);
+          }
           if (data.access_token) {
-            setAccessToken(data.access_token);
+            setAccessToken(data.access_token as string);
             // timely-token already persisted to api_credentials; update local state only
           } else {
             setConnectError(`Timely did not return an access token. Response: ${JSON.stringify(data)}`);

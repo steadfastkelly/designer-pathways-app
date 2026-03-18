@@ -21,7 +21,16 @@ export default async function handler(req, res) {
       body: JSON.stringify({ grant_type: 'authorization_code', client_id, client_secret, code, redirect_uri }),
     });
 
-    const data = await tokenRes.json();
+    const rawText = await tokenRes.text();
+    if (!rawText.trim()) {
+      return res.status(502).json({ error: `Empty response from Timely token endpoint (HTTP ${tokenRes.status})` });
+    }
+    let data;
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      return res.status(502).json({ error: `Timely returned non-JSON (HTTP ${tokenRes.status}): ${rawText.slice(0, 200)}` });
+    }
 
     if (data.access_token) {
       const supabaseUrl = process.env.VITE_SUPABASE_URL;
@@ -56,7 +65,7 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.status(tokenRes.status).json(data);
+    return res.status(data.access_token ? 200 : tokenRes.status).json(data);
   } catch (e) {
     return res.status(502).json({ error: e instanceof Error ? e.message : String(e) });
   }
