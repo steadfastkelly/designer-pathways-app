@@ -401,7 +401,7 @@ export async function syncTimelyData(
 
   try {
     // Fetch all time entries via server-side proxy (avoids CORS)
-    const url = `/.netlify/functions/timely-events?account_id=${encodeURIComponent(accountId)}`;
+    const url = `/api/timely-events?account_id=${encodeURIComponent(accountId)}`;
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
     });

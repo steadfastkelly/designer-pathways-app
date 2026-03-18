@@ -78,7 +78,7 @@ function ProfilesTab({ members, loading }: { members: ReturnType<typeof useTeamD
     setSeeding(true);
     setSeedResult(null);
     try {
-      const res = await fetch('/.netlify/functions/seed-users', { method: 'POST' });
+      const res = await fetch('/api/seed-users', { method: 'POST' });
       const data = await res.json();
       setSeedResult(data);
       if (data.seeded?.length > 0) window.location.reload();
@@ -249,7 +249,7 @@ function TimelyTab() {
 
         try {
           // timely-token handles both exchange AND persistence (Netlify env vars + Supabase)
-          const res = await fetch('/.netlify/functions/timely-token', {
+          const res = await fetch('/api/timely-token', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
