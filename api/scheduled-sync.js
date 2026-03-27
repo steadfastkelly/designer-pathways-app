@@ -41,6 +41,13 @@ async function getApiCreds(supabase, service) {
   return data?.credentials ?? null;
 }
 
+async function upsertAppSetting(supabase, key, value) {
+  await supabase.from('app_settings').upsert(
+    { key, value, updated_at: new Date().toISOString() },
+    { onConflict: 'key' },
+  );
+}
+
 // ─── Timely ──────────────────────────────────────────────────────────────────
 
 async function refreshTimelyToken(supabase, creds) {
@@ -64,13 +71,17 @@ async function refreshTimelyToken(supabase, creds) {
 
 async function syncTimely(supabase, creds) {
   const errors = [];
+  const warnings = [];
   let synced = 0;
+  const attemptedAt = new Date().toISOString();
   const allEvents = [];
   let page = 1;
   const perPage = 1000;
   let token = creds.access_token;
   const accountId = creds.account_id;
   let refreshed = false;
+
+  await upsertAppSetting(supabase, 'timely_last_attempt', attemptedAt);
 
   while (true) {
     const res = await safeFetch(
@@ -92,51 +103,79 @@ async function syncTimely(supabase, creds) {
     await sleep(200);
   }
 
-  if (errors.length) return { synced, errors };
+  if (errors.length === 0) {
+    const { data: profiles } = await supabase.from('profiles').select('id, email');
+    const emailToId = {};
+    for (const p of (profiles ?? [])) emailToId[p.email.toLowerCase()] = p.id;
 
-  const { data: profiles } = await supabase.from('profiles').select('id, email');
-  const emailToId = {};
-  for (const p of (profiles ?? [])) emailToId[p.email.toLowerCase()] = p.id;
+    const grouped = {};
+    let skippedMissingEmail = 0;
+    let skippedInvalidDate = 0;
+    let skippedUnknownDesigner = 0;
+    for (const event of allEvents) {
+      const email = event.user?.email?.toLowerCase();
+      if (!email) { skippedMissingEmail++; continue; }
+      const date = new Date(event.day);
+      if (isNaN(date.getTime())) { skippedInvalidDate++; continue; }
+      const year = date.getFullYear();
+      const month = date.getMonth() + 1;
+      const key = `${email}-${year}-${month}`;
+      const hours = (event.duration?.hours ?? 0) + (event.duration?.minutes ?? 0) / 60;
+      const billable = event.billed === true || event.billable === true;
+      if (!grouped[key]) grouped[key] = { email, year, month, totalHours: 0, billableHours: 0, internalHours: 0 };
+      grouped[key].totalHours += hours;
+      if (billable) grouped[key].billableHours += hours;
+      else grouped[key].internalHours += hours;
+    }
 
-  const grouped = {};
-  for (const event of allEvents) {
-    const email = event.user?.email?.toLowerCase();
-    if (!email) continue;
-    const date = new Date(event.day);
-    if (isNaN(date.getTime())) continue;
-    const year = date.getFullYear();
-    const month = date.getMonth() + 1;
-    const key = `${email}-${year}-${month}`;
-    const hours = (event.duration?.hours ?? 0) + (event.duration?.minutes ?? 0) / 60;
-    const billable = event.billed === true || event.billable === true;
-    if (!grouped[key]) grouped[key] = { email, year, month, totalHours: 0, billableHours: 0, internalHours: 0 };
-    grouped[key].totalHours += hours;
-    if (billable) grouped[key].billableHours += hours;
-    else grouped[key].internalHours += hours;
+    for (const entry of Object.values(grouped)) {
+      const designerId = emailToId[entry.email];
+      if (!designerId) { skippedUnknownDesigner++; continue; }
+      const billablePercent = entry.totalHours > 0 ? Math.round((entry.billableHours / entry.totalHours) * 100) : 0;
+      const { error } = await supabase.from('monthly_hours_summary').upsert({
+        designer_id: designerId, year: entry.year, month: entry.month,
+        total_hours: Math.round(entry.totalHours * 100) / 100,
+        billable_hours: Math.round(entry.billableHours * 100) / 100,
+        internal_hours: Math.round(entry.internalHours * 100) / 100,
+        billable_percent: billablePercent, logging_days: 0, internal_breakdown: {},
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'designer_id,year,month' });
+      if (error) errors.push(`Upsert ${entry.email}: ${error.message}`);
+      else synced++;
+    }
+
+    if (skippedMissingEmail > 0) warnings.push(`Skipped ${skippedMissingEmail} Timely event(s) missing user email`);
+    if (skippedInvalidDate > 0) warnings.push(`Skipped ${skippedInvalidDate} Timely event(s) with invalid day`);
+    if (skippedUnknownDesigner > 0) warnings.push(`Skipped ${skippedUnknownDesigner} Timely event(s) for users not found in profiles`);
   }
 
-  for (const entry of Object.values(grouped)) {
-    const designerId = emailToId[entry.email];
-    if (!designerId) continue;
-    const billablePercent = entry.totalHours > 0 ? Math.round((entry.billableHours / entry.totalHours) * 100) : 0;
-    const { error } = await supabase.from('monthly_hours_summary').upsert({
-      designer_id: designerId, year: entry.year, month: entry.month,
-      total_hours: Math.round(entry.totalHours * 100) / 100,
-      billable_hours: Math.round(entry.billableHours * 100) / 100,
-      internal_hours: Math.round(entry.internalHours * 100) / 100,
-      billable_percent: billablePercent, logging_days: 0, internal_breakdown: {},
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'designer_id,year,month' });
-    if (error) errors.push(`Upsert ${entry.email}: ${error.message}`);
-    else synced++;
+  const completedAt = new Date().toISOString();
+  const success = errors.length === 0;
+  if (success) {
+    await Promise.all([
+      upsertAppSetting(supabase, 'timely_last_sync', completedAt),
+      upsertAppSetting(supabase, 'timely_last_success', completedAt),
+    ]);
+  } else {
+    const latestError = errors[errors.length - 1];
+    await Promise.all([
+      upsertAppSetting(supabase, 'timely_last_error', latestError),
+      upsertAppSetting(supabase, 'timely_last_error_at', completedAt),
+    ]);
   }
 
-  await supabase.from('app_settings').upsert(
-    { key: 'timely_last_sync', value: new Date().toISOString(), updated_at: new Date().toISOString() },
-    { onConflict: 'key' },
-  );
-
-  return { synced, errors };
+  return {
+    synced,
+    errors,
+    warnings,
+    status: {
+      attempted_at: attemptedAt,
+      success,
+      synced,
+      error_count: errors.length,
+      warning_count: warnings.length,
+    },
+  };
 }
 
 // ─── ClickUp ─────────────────────────────────────────────────────────────────
@@ -239,12 +278,13 @@ export default async function handler(req, res) {
 
   const clickupKey  = clickupCreds?.api_key;
   const clickupTeam = clickupCreds?.team_id;
-  const syncLog = { timely: null, clickup: null, errors: [] };
+  const syncLog = { timely: null, timely_status: null, clickup: null, errors: [] };
 
   if (timelyCreds?.access_token && timelyCreds?.account_id) {
     try {
       syncLog.timely = await syncTimely(supabase, timelyCreds);
-      console.log('Timely sync:', syncLog.timely.synced, 'records,', syncLog.timely.errors.length, 'errors');
+      syncLog.timely_status = syncLog.timely.status;
+      console.log('Timely sync:', syncLog.timely.synced, 'records,', syncLog.timely.errors.length, 'errors,', syncLog.timely.warnings.length, 'warnings');
     } catch (e) {
       syncLog.errors.push(`Timely sync failed: ${e.message}`);
     }

@@ -390,6 +390,16 @@ export async function uploadAvatar(file: File, userId: string): Promise<string |
 export interface TimelySyncResult {
   synced: number;
   errors: string[];
+  warnings: string[];
+  attempted_at: string | null;
+  success: boolean;
+  error_count: number;
+  warning_count: number;
+}
+
+export interface SyncResult {
+  synced: number;
+  errors: string[];
 }
 
 // Delegates to the server-side /api/scheduled-sync route, which uses the
@@ -397,25 +407,76 @@ export interface TimelySyncResult {
 // The token/accountId params are accepted for call-site compatibility but
 // are not used — the server reads credentials from the api_credentials table.
 export async function syncTimelyData(
-  _token: string,
-  _accountId: string,
+  token: string,
+  accountId: string,
 ): Promise<TimelySyncResult> {
+  void token;
+  void accountId;
+  const attemptedAt = new Date().toISOString();
   try {
     const res = await fetch('/api/scheduled-sync', { method: 'POST' });
     const text = await res.text();
     if (!text.trim()) {
-      return { synced: 0, errors: [`Empty response from /api/scheduled-sync (HTTP ${res.status}). Check SUPABASE_SERVICE_ROLE_KEY is set in Vercel for all environments.`] };
+      return {
+        synced: 0,
+        errors: [`Empty response from /api/scheduled-sync (HTTP ${res.status}). Check SUPABASE_SERVICE_ROLE_KEY is set in Vercel for all environments.`],
+        warnings: [],
+        attempted_at: attemptedAt,
+        success: false,
+        error_count: 1,
+        warning_count: 0,
+      };
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let json: any;
     try { json = JSON.parse(text); } catch {
-      return { synced: 0, errors: [`Non-JSON from /api/scheduled-sync: ${text.slice(0, 200)}`] };
+      return {
+        synced: 0,
+        errors: [`Non-JSON from /api/scheduled-sync: ${text.slice(0, 200)}`],
+        warnings: [],
+        attempted_at: attemptedAt,
+        success: false,
+        error_count: 1,
+        warning_count: 0,
+      };
     }
-    if (!res.ok) return { synced: 0, errors: [json?.error ?? `Sync server error: ${res.status}`] };
+    if (!res.ok) {
+      return {
+        synced: 0,
+        errors: [json?.error ?? `Sync server error: ${res.status}`],
+        warnings: [],
+        attempted_at: attemptedAt,
+        success: false,
+        error_count: 1,
+        warning_count: 0,
+      };
+    }
     const t = json.timely;
-    return { synced: t?.synced ?? 0, errors: [...(t?.errors ?? []), ...(json.errors ?? [])] };
+    const mergedErrors = [...(t?.errors ?? []), ...(json.errors ?? [])];
+    const warnings = [...(t?.warnings ?? [])];
+    const status = json.timely_status ?? t?.status ?? {};
+    const synced = t?.synced ?? status.synced ?? 0;
+    const errorCount = status.error_count ?? mergedErrors.length;
+    const warningCount = status.warning_count ?? warnings.length;
+    return {
+      synced,
+      errors: mergedErrors,
+      warnings,
+      attempted_at: status.attempted_at ?? attemptedAt,
+      success: typeof status.success === 'boolean' ? status.success : errorCount === 0,
+      error_count: errorCount,
+      warning_count: warningCount,
+    };
   } catch (e) {
-    return { synced: 0, errors: [`Sync failed: ${e instanceof Error ? e.message : String(e)}`] };
+    return {
+      synced: 0,
+      errors: [`Sync failed: ${e instanceof Error ? e.message : String(e)}`],
+      warnings: [],
+      attempted_at: attemptedAt,
+      success: false,
+      error_count: 1,
+      warning_count: 0,
+    };
   }
 }
 
@@ -423,9 +484,11 @@ export async function syncTimelyData(
 
 // Same delegation pattern as syncTimelyData — all sync logic runs server-side.
 export async function syncClickUpData(
-  _apiKey: string,
-  _teamId: string,
-): Promise<TimelySyncResult> {
+  apiKey: string,
+  teamId: string,
+): Promise<SyncResult> {
+  void apiKey;
+  void teamId;
   try {
     const res = await fetch('/api/scheduled-sync', { method: 'POST' });
     const text = await res.text();
