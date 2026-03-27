@@ -5,6 +5,7 @@ import { useBumpSyncVersion } from '../contexts/SyncContext';
 import { Link } from 'react-router-dom';
 import { Avatar } from '../components/team/DesignerCard';
 import { PATHWAY_LEVEL_LABELS } from '../types';
+import { getJsonApiErrorMessage, readJsonSafely } from '../lib/http';
 import {
   getAppSettings,
   getApiCredentials, upsertApiCredentials,
@@ -274,21 +275,18 @@ function TimelyTab() {
               redirect_uri: TIMELY_REDIRECT_URI,
             }),
           });
-          const rawText = await res.text();
-          if (!rawText.trim()) {
-            throw new Error(`Empty response from token exchange (HTTP ${res.status})`);
+          const parsed = await readJsonSafely<{ access_token?: string; error?: string; message?: string }>(res);
+          if (parsed.parseError) {
+            throw new Error(getJsonApiErrorMessage(parsed));
           }
-          let data: Record<string, unknown>;
-          try {
-            data = JSON.parse(rawText);
-          } catch {
-            throw new Error(`Token exchange returned non-JSON (HTTP ${res.status}): ${rawText.slice(0, 200)}`);
+          if (!res.ok) {
+            throw new Error(getJsonApiErrorMessage(parsed));
           }
-          if (data.access_token) {
-            setAccessToken(data.access_token as string);
+          if (parsed.data?.access_token) {
+            setAccessToken(parsed.data.access_token);
             // timely-token already persisted to api_credentials; update local state only
           } else {
-            setConnectError(`Timely did not return an access token. Response: ${JSON.stringify(data)}`);
+            setConnectError(`Timely did not return an access token. Response: ${JSON.stringify(parsed.data)}`);
           }
         } catch (e) {
           setConnectError(`Connection failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -356,8 +354,17 @@ function TimelyTab() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ service: 'timely' }),
       });
-      const json = await res.json().catch(() => ({ ok: false, message: `Server error: ${res.status}` }));
-      setTestResult(json);
+      const parsed = await readJsonSafely<{ ok?: boolean; message?: string; error?: string }>(res);
+      if (parsed.parseError) {
+        setTestResult({ ok: false, message: getJsonApiErrorMessage(parsed) });
+      } else if (!res.ok) {
+        setTestResult({ ok: false, message: getJsonApiErrorMessage(parsed) });
+      } else {
+        setTestResult({
+          ok: Boolean(parsed.data?.ok),
+          message: typeof parsed.data?.message === 'string' ? parsed.data.message : 'Connection test completed.',
+        });
+      }
     } catch (e) {
       setTestResult({ ok: false, message: e instanceof Error ? e.message : String(e) });
     }
@@ -595,8 +602,17 @@ function ClickUpTab() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ service: 'clickup' }),
       });
-      const json = await res.json().catch(() => ({ ok: false, message: `Server error: ${res.status}` }));
-      setTestResult(json);
+      const parsed = await readJsonSafely<{ ok?: boolean; message?: string; error?: string }>(res);
+      if (parsed.parseError) {
+        setTestResult({ ok: false, message: getJsonApiErrorMessage(parsed) });
+      } else if (!res.ok) {
+        setTestResult({ ok: false, message: getJsonApiErrorMessage(parsed) });
+      } else {
+        setTestResult({
+          ok: Boolean(parsed.data?.ok),
+          message: typeof parsed.data?.message === 'string' ? parsed.data.message : 'Connection test completed.',
+        });
+      }
     } catch (e) {
       setTestResult({ ok: false, message: e instanceof Error ? e.message : String(e) });
     }
