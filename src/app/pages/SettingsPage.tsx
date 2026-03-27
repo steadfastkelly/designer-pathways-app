@@ -208,6 +208,8 @@ function TimelyTab() {
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<{ synced: number; errors: string[] } | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   // Load saved credentials from api_credentials table
   useEffect(() => {
@@ -339,6 +341,23 @@ function TimelyTab() {
     await upsertApiCredentials('timely', { access_token: '' });
   };
 
+  const handleTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await fetch('/api/test-connection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ service: 'timely' }),
+      });
+      const json = await res.json().catch(() => ({ ok: false, message: `Server error: ${res.status}` }));
+      setTestResult(json);
+    } catch (e) {
+      setTestResult({ ok: false, message: e instanceof Error ? e.message : String(e) });
+    }
+    setTesting(false);
+  };
+
   const isConfigured = !!(clientId && clientSecret && accountId);
   const isConnected = !!accessToken;
 
@@ -452,13 +471,34 @@ function TimelyTab() {
             </button>
           )}
           {isConnected && (
+            <button
+              onClick={handleTest}
+              disabled={testing}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px',
+                background: 'var(--bg-inner)', color: 'var(--text-secondary)',
+                border: '1px solid var(--border)', borderRadius: 8, fontSize: 13, fontWeight: 500,
+                cursor: testing ? 'not-allowed' : 'pointer',
+              }}
+            >
+              <CheckCircle size={14} />
+              {testing ? 'Testing…' : 'Test Connection'}
+            </button>
+          )}
+          {isConnected && (
             <button onClick={handleDisconnect} style={{ padding: '8px 14px', background: 'transparent', color: 'var(--text-subtle)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12, cursor: 'pointer' }}>
               Disconnect
             </button>
           )}
         </div>
+        {testResult && (
+          <div style={{ marginTop: 10, fontSize: 12, color: testResult.ok ? 'var(--accent-green)' : 'var(--accent-red)', display: 'flex', alignItems: 'center', gap: 6 }}>
+            {testResult.ok ? <CheckCircle size={12} /> : <AlertCircle size={12} />}
+            {testResult.message}
+          </div>
+        )}
         {lastSync && (
-          <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-subtle)' }}>
+          <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-subtle)' }}>
             Last synced: {new Date(lastSync).toLocaleString()}
           </div>
         )}
@@ -496,6 +536,8 @@ function ClickUpTab() {
   const [saved, setSaved] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<{ synced: number; errors: string[] } | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   useEffect(() => {
     getApiCredentials('clickup').then(creds => {
@@ -535,6 +577,23 @@ function ClickUpTab() {
       setLastSync(new Date().toISOString());
     }
   }, [apiKey, teamId]);
+
+  const handleTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await fetch('/api/test-connection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ service: 'clickup' }),
+      });
+      const json = await res.json().catch(() => ({ ok: false, message: `Server error: ${res.status}` }));
+      setTestResult(json);
+    } catch (e) {
+      setTestResult({ ok: false, message: e instanceof Error ? e.message : String(e) });
+    }
+    setTesting(false);
+  };
 
   const isConnected = !!(apiKey && teamId);
 
@@ -603,12 +662,31 @@ function ClickUpTab() {
             <RefreshCw size={14} style={{ animation: syncing ? 'spin 1s linear infinite' : 'none' }} />
             {syncing ? 'Syncing…' : 'Sync Now'}
           </button>
+          <button
+            onClick={handleTest}
+            disabled={testing || !isConnected}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px',
+              background: 'var(--bg-inner)', color: isConnected ? 'var(--text-secondary)' : 'var(--text-subtle)',
+              border: '1px solid var(--border)', borderRadius: 8, fontSize: 13, fontWeight: 500,
+              cursor: testing || !isConnected ? 'not-allowed' : 'pointer',
+            }}
+          >
+            <CheckCircle size={14} />
+            {testing ? 'Testing…' : 'Test Connection'}
+          </button>
         </div>
         {saveError && (
           <div style={{ marginTop: 10, fontSize: 12, color: 'var(--accent-red)' }}>{saveError}</div>
         )}
+        {testResult && (
+          <div style={{ marginTop: 10, fontSize: 12, color: testResult.ok ? 'var(--accent-green)' : 'var(--accent-red)', display: 'flex', alignItems: 'center', gap: 6 }}>
+            {testResult.ok ? <CheckCircle size={12} /> : <AlertCircle size={12} />}
+            {testResult.message}
+          </div>
+        )}
         {lastSync && (
-          <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-subtle)' }}>
+          <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-subtle)' }}>
             Last synced: {new Date(lastSync).toLocaleString()}
           </div>
         )}

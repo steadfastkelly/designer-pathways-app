@@ -81,6 +81,7 @@ export default async function handler(req, res) {
           app_id: client_id,
           app_secret: client_secret,
           access_token: data.access_token,
+          ...(data.refresh_token ? { refresh_token: data.refresh_token } : {}),
           ...(account_id ? { account_id } : {}),
         };
 

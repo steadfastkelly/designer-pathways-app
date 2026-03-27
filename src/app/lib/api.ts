@@ -392,201 +392,55 @@ export interface TimelySyncResult {
   errors: string[];
 }
 
+// Delegates to the server-side /api/scheduled-sync route, which uses the
+// Supabase service role key (bypasses RLS) and keeps API keys server-side.
+// The token/accountId params are accepted for call-site compatibility but
+// are not used — the server reads credentials from the api_credentials table.
 export async function syncTimelyData(
-  token: string,
-  accountId: string,
+  _token: string,
+  _accountId: string,
 ): Promise<TimelySyncResult> {
-  const errors: string[] = [];
-  let synced = 0;
-
   try {
-    // Fetch all time entries via server-side proxy (avoids CORS)
-    const url = `/api/timely-events?account_id=${encodeURIComponent(accountId)}`;
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-    if (!res.ok) {
-      const errText = await res.text().catch(() => res.statusText);
-      let errMsg = res.statusText;
-      try { errMsg = (JSON.parse(errText) as { error?: string }).error ?? errMsg; } catch { errMsg = errText.slice(0, 200); }
-      errors.push(`Timely API error: ${res.status} ${errMsg}`);
-      return { synced, errors };
-    }
-
-    const eventsText = await res.text();
-    if (!eventsText.trim()) {
-      errors.push(`Empty response from /api/timely-events (HTTP ${res.status}). Check SUPABASE_SERVICE_ROLE_KEY in Vercel.`);
-      return { synced, errors };
+    const res = await fetch('/api/scheduled-sync', { method: 'POST' });
+    const text = await res.text();
+    if (!text.trim()) {
+      return { synced: 0, errors: [`Empty response from /api/scheduled-sync (HTTP ${res.status}). Check SUPABASE_SERVICE_ROLE_KEY is set in Vercel for all environments.`] };
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let events: any[];
-    try {
-      const parsed = JSON.parse(eventsText);
-      events = Array.isArray(parsed) ? parsed : [];
-      if (!Array.isArray(parsed)) {
-        errors.push(`Unexpected Timely API response format: ${eventsText.slice(0, 200)}`);
-        return { synced, errors };
-      }
-    } catch {
-      errors.push(`Non-JSON response from /api/timely-events: ${eventsText.slice(0, 200)}`);
-      return { synced, errors };
+    let json: any;
+    try { json = JSON.parse(text); } catch {
+      return { synced: 0, errors: [`Non-JSON from /api/scheduled-sync: ${text.slice(0, 200)}`] };
     }
-    // Group events by user + year + month
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const grouped: Record<string, { userId: string; email: string; year: number; month: number; totalHours: number; billableHours: number; internalHours: number }> = {};
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    for (const event of events as any[]) {
-      const userId = event.user?.id;
-      const email = event.user?.email?.toLowerCase();
-      if (!userId || !email) continue;
-
-      const date = new Date(event.day);
-      if (isNaN(date.getTime())) continue;
-
-      const year = date.getFullYear();
-      const month = date.getMonth() + 1;
-      const key = `${email}-${year}-${month}`;
-      const hours = (event.duration?.hours ?? 0) + (event.duration?.minutes ?? 0) / 60;
-      const billable = event.billed === true || event.billable === true;
-
-      if (!grouped[key]) {
-        grouped[key] = { userId, email, year, month, totalHours: 0, billableHours: 0, internalHours: 0 };
-      }
-      grouped[key].totalHours += hours;
-      if (billable) grouped[key].billableHours += hours;
-      else grouped[key].internalHours += hours;
-    }
-
-    // Get all designers to map email → id
-    const designers = await getAllProfiles();
-    const emailToId: Record<string, string> = {};
-    for (const d of designers) {
-      emailToId[d.email.toLowerCase()] = d.id;
-    }
-
-    // Upsert monthly summaries
-    for (const entry of Object.values(grouped)) {
-      const designerId = emailToId[entry.email];
-      if (!designerId) continue;
-
-      const billablePercent = entry.totalHours > 0
-        ? Math.round((entry.billableHours / entry.totalHours) * 100)
-        : 0;
-
-      const { error } = await supabase
-        .from('monthly_hours_summary')
-        .upsert({
-          designer_id: designerId,
-          year: entry.year,
-          month: entry.month,
-          total_hours: Math.round(entry.totalHours * 100) / 100,
-          billable_hours: Math.round(entry.billableHours * 100) / 100,
-          internal_hours: Math.round(entry.internalHours * 100) / 100,
-          billable_percent: billablePercent,
-          logging_days: 0,
-          internal_breakdown: {},
-          updated_at: new Date().toISOString(),
-        }, { onConflict: 'designer_id,year,month' });
-
-      if (error) errors.push(`Upsert error for ${entry.email} ${entry.year}/${entry.month}: ${error.message}`);
-      else synced++;
-    }
-
-    await setAppSetting('timely_last_sync', new Date().toISOString());
+    if (!res.ok) return { synced: 0, errors: [json?.error ?? `Sync server error: ${res.status}`] };
+    const t = json.timely;
+    return { synced: t?.synced ?? 0, errors: [...(t?.errors ?? []), ...(json.errors ?? [])] };
   } catch (e) {
-    errors.push(`Sync failed: ${e instanceof Error ? e.message : String(e)}`);
+    return { synced: 0, errors: [`Sync failed: ${e instanceof Error ? e.message : String(e)}`] };
   }
-
-  return { synced, errors };
 }
 
 // ─── ClickUp Sync ──────────────────────────────────────────────────────────────
 
+// Same delegation pattern as syncTimelyData — all sync logic runs server-side.
 export async function syncClickUpData(
-  apiKey: string,
-  teamId: string,
+  _apiKey: string,
+  _teamId: string,
 ): Promise<TimelySyncResult> {
-  const errors: string[] = [];
-  let synced = 0;
-
   try {
-    // Fetch all tasks from the team — paginate through
-    let page = 0;
-    let hasMore = true;
-    const allTasks: unknown[] = [];
-
-    while (hasMore) {
-      const res = await fetch(
-        `https://api.clickup.com/api/v2/team/${teamId}/task?page=${page}&include_closed=true&subtasks=true&per_page=100`,
-        { headers: { Authorization: apiKey } },
-      );
-
-      if (!res.ok) {
-        const errText = await res.text().catch(() => res.statusText);
-        errors.push(`ClickUp API error: ${res.status} — ${errText.slice(0, 200)}`);
-        break;
-      }
-
-      const bodyText = await res.text();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let json: any;
-      try { json = JSON.parse(bodyText); } catch {
-        errors.push(`ClickUp returned non-JSON on page ${page}: ${bodyText.slice(0, 200)}`);
-        break;
-      }
-      const tasks = json.tasks ?? [];
-      allTasks.push(...tasks);
-      hasMore = tasks.length === 100;
-      page++;
+    const res = await fetch('/api/scheduled-sync', { method: 'POST' });
+    const text = await res.text();
+    if (!text.trim()) {
+      return { synced: 0, errors: [`Empty response from /api/scheduled-sync (HTTP ${res.status}). Check SUPABASE_SERVICE_ROLE_KEY is set in Vercel for all environments.`] };
     }
-
-    // Get designers to map email → id
-    const designers = await getAllProfiles();
-    const emailToId: Record<string, string> = {};
-    for (const d of designers) emailToId[d.email.toLowerCase()] = d.id;
-
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    for (const task of allTasks as any[]) {
-      const dueDate = task.due_date ? new Date(Number(task.due_date)) : null;
-      const completedDate = task.date_closed ? new Date(Number(task.date_closed)) : null;
-
-      if (!dueDate) continue;
-
-      const wasLate = !!(completedDate && completedDate > dueDate);
-      const daysLate = wasLate
-        ? Math.ceil((completedDate!.getTime() - dueDate.getTime()) / 86400000)
-        : 0;
-
-      for (const assignee of (task.assignees ?? [])) {
-        const email = assignee.email?.toLowerCase();
-        const designerId = email ? emailToId[email] : null;
-        if (!designerId) continue;
-
-        const { error } = await supabase
-          .from('clickup_deadlines')
-          .upsert({
-            clickup_task_id: task.id,
-            designer_id: designerId,
-            task_name: task.name ?? 'Untitled',
-            due_date: dueDate.toISOString().slice(0, 10),
-            completed_date: completedDate ? completedDate.toISOString().slice(0, 10) : null,
-            was_late: wasLate,
-            days_late: daysLate,
-            clickup_url: task.url ?? null,
-            updated_at: new Date().toISOString(),
-          }, { onConflict: 'clickup_task_id,designer_id' });
-
-        if (error) errors.push(`ClickUp upsert error ${task.id}: ${error.message}`);
-        else synced++;
-      }
+    let json: any;
+    try { json = JSON.parse(text); } catch {
+      return { synced: 0, errors: [`Non-JSON from /api/scheduled-sync: ${text.slice(0, 200)}`] };
     }
-
-    await setAppSetting('clickup_last_sync', new Date().toISOString());
+    if (!res.ok) return { synced: 0, errors: [json?.error ?? `Sync server error: ${res.status}`] };
+    const c = json.clickup;
+    return { synced: c?.synced ?? 0, errors: [...(c?.errors ?? []), ...(json.errors ?? [])] };
   } catch (e) {
-    errors.push(`Sync failed: ${e instanceof Error ? e.message : String(e)}`);
+    return { synced: 0, errors: [`Sync failed: ${e instanceof Error ? e.message : String(e)}`] };
   }
-
-  return { synced, errors };
 }
