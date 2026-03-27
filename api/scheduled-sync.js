@@ -41,6 +41,32 @@ async function getApiCreds(supabase, service) {
   return data?.credentials ?? null;
 }
 
+async function getAppSetting(supabase, key) {
+  const { data, error } = await supabase
+    .from('app_settings')
+    .select('value')
+    .eq('key', key)
+    .maybeSingle();
+  if (error) {
+    console.error(`getAppSetting(${key}):`, error.message);
+    return null;
+  }
+  return data?.value ?? null;
+}
+
+function parseCursorDate(value) {
+  if (!value || typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const date = new Date(trimmed);
+  if (Number.isNaN(date.getTime())) return null;
+  return date;
+}
+
+function toTimelyDay(date) {
+  return date.toISOString().slice(0, 10);
+}
+
 // ─── Timely ──────────────────────────────────────────────────────────────────
 
 async function refreshTimelyToken(supabase, creds) {
@@ -62,7 +88,7 @@ async function refreshTimelyToken(supabase, creds) {
   return data.access_token;
 }
 
-async function syncTimely(supabase, creds) {
+async function syncTimely(supabase, creds, options = {}) {
   const errors = [];
   let synced = 0;
   const allEvents = [];
@@ -71,10 +97,34 @@ async function syncTimely(supabase, creds) {
   let token = creds.access_token;
   const accountId = creds.account_id;
   let refreshed = false;
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const rawCursor = await getAppSetting(supabase, 'timely_sync_cursor');
+  const parsedCursor = parseCursorDate(rawCursor);
+  const forceFullSync = options.forceFullSync === true;
+  const runMode = forceFullSync ? 'full' : 'incremental';
+  const since = forceFullSync
+    ? null
+    : (parsedCursor ? toTimelyDay(parsedCursor) : null);
+  const upto = toTimelyDay(now);
+
+  if (!forceFullSync && !since) {
+    errors.push('timely_sync_cursor missing or invalid; trigger full-sync mode to backfill historical data.');
+    return { synced, errors, runMode, cursorStart: rawCursor ?? null, cursorEnd: nowIso, cursorAfter: rawCursor ?? null };
+  }
 
   while (true) {
+    const params = new URLSearchParams({
+      per_page: String(perPage),
+      page: String(page),
+    });
+    if (since) {
+      params.set('since', since);
+      params.set('upto', upto);
+    }
+
     const res = await safeFetch(
-      `https://api.timelyapp.com/1.1/${accountId}/events?per_page=${perPage}&page=${page}`,
+      `https://api.timelyapp.com/1.1/${accountId}/events?${params.toString()}`,
       { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } },
     );
     if (res.status === 401 && !refreshed) {
@@ -92,7 +142,7 @@ async function syncTimely(supabase, creds) {
     await sleep(200);
   }
 
-  if (errors.length) return { synced, errors };
+  if (errors.length) return { synced, errors, runMode, cursorStart: rawCursor ?? null, cursorEnd: nowIso, cursorAfter: rawCursor ?? null };
 
   const { data: profiles } = await supabase.from('profiles').select('id, email');
   const emailToId = {};
@@ -131,12 +181,27 @@ async function syncTimely(supabase, creds) {
     else synced++;
   }
 
-  await supabase.from('app_settings').upsert(
-    { key: 'timely_last_sync', value: new Date().toISOString(), updated_at: new Date().toISOString() },
-    { onConflict: 'key' },
-  );
+  if (!errors.length) {
+    const updateRows = [
+      { key: 'timely_last_sync', value: nowIso, updated_at: nowIso },
+      { key: 'timely_sync_cursor', value: nowIso, updated_at: nowIso },
+    ];
+    const { error: settingsError } = await supabase
+      .from('app_settings')
+      .upsert(updateRows, { onConflict: 'key' });
+    if (settingsError) {
+      errors.push(`Failed to update sync cursor: ${settingsError.message}`);
+    }
+  }
 
-  return { synced, errors };
+  return {
+    synced,
+    errors,
+    runMode,
+    cursorStart: rawCursor ?? null,
+    cursorEnd: nowIso,
+    cursorAfter: errors.length ? (rawCursor ?? null) : nowIso,
+  };
 }
 
 // ─── ClickUp ─────────────────────────────────────────────────────────────────
@@ -232,6 +297,10 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: e.message });
   }
 
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const fullSyncFlag = String(req.query?.full_sync ?? req.query?.fullSync ?? body.full_sync ?? body.fullSync ?? '').toLowerCase();
+  const forceFullSync = fullSyncFlag === '1' || fullSyncFlag === 'true' || fullSyncFlag === 'yes';
+
   const [timelyCreds, clickupCreds] = await Promise.all([
     getApiCreds(supabase, 'timely'),
     getApiCreds(supabase, 'clickup'),
@@ -243,7 +312,7 @@ export default async function handler(req, res) {
 
   if (timelyCreds?.access_token && timelyCreds?.account_id) {
     try {
-      syncLog.timely = await syncTimely(supabase, timelyCreds);
+      syncLog.timely = await syncTimely(supabase, timelyCreds, { forceFullSync });
       console.log('Timely sync:', syncLog.timely.synced, 'records,', syncLog.timely.errors.length, 'errors');
     } catch (e) {
       syncLog.errors.push(`Timely sync failed: ${e.message}`);
@@ -263,5 +332,6 @@ export default async function handler(req, res) {
     syncLog.errors.push('ClickUp credentials not configured in api_credentials — skipping');
   }
 
+  syncLog.runMode = forceFullSync ? 'full' : 'incremental';
   return res.status(200).json(syncLog);
 }
