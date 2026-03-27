@@ -1,9 +1,38 @@
+import { useState, useEffect } from 'react';
 import { useTeamData } from '../hooks/useTeamData';
 import { DesignerCard } from '../components/team/DesignerCard';
 import { StatusCounters } from '../components/team/StatusCounters';
+import { getAppSettings } from '../lib/api';
+import { useSyncVersion } from '../contexts/SyncContext';
+
+function useLastSynced() {
+  const syncVersion = useSyncVersion();
+  const [lastSync, setLastSync] = useState<string | null>(null);
+  useEffect(() => {
+    getAppSettings(['timely_last_sync', 'clickup_last_sync']).then(s => {
+      const t = s.timely_last_sync ?? null;
+      const c = s.clickup_last_sync ?? null;
+      // Show the most recent of the two
+      if (t && c) setLastSync(t > c ? t : c);
+      else setLastSync(t ?? c ?? null);
+    });
+  }, [syncVersion]);
+  return lastSync;
+}
+
+function LastSyncedChip({ isoString }: { isoString: string }) {
+  const mins = Math.round((Date.now() - new Date(isoString).getTime()) / 60000);
+  const label = mins < 1 ? 'just now' : mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
+  return (
+    <span style={{ fontSize: 11, color: 'var(--text-subtle)', fontStyle: 'italic' }}>
+      Last synced {label}
+    </span>
+  );
+}
 
 export function TeamPage() {
   const { members, loading, error } = useTeamData();
+  const lastSync = useLastSynced();
 
   if (loading) {
     return (
@@ -25,7 +54,10 @@ export function TeamPage() {
     <div>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
-        <h1 style={{ fontSize: 28, fontWeight: 400, margin: 0 }}>Team</h1>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+          <h1 style={{ fontSize: 28, fontWeight: 400, margin: 0 }}>Team</h1>
+          {lastSync && <LastSyncedChip isoString={lastSync} />}
+        </div>
         <StatusCounters scores={members.map((m) => m.score)} />
       </div>
 

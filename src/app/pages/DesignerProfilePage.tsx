@@ -110,6 +110,7 @@ export function DesignerProfilePage() {
           profile={displayProfile}
           compensationHistory={displayCompHistory}
           bonuses={bonuses}
+          monthlyHours={monthlyHours}
           onHistoryUpdated={record => setLocalCompHistory(prev => [record, ...(prev ?? compensationHistory)])}
         />
       )}

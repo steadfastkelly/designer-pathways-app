@@ -22,12 +22,6 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-function deriveRole(email: string): UserRole {
-  if (email === 'kelly@steadfast.design') return 'admin';
-  if (email === 'tori@steadfast.design') return 'supervisor';
-  return 'designer';
-}
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
@@ -40,12 +34,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (p) {
       setProfile(p);
     } else {
-      // Fallback: derive role from email
+      // Profile not in DB yet — use 'designer' as safe default until seeded
       setProfile({
         id: userId,
         email,
         name: email.split('@')[0],
-        role: deriveRole(email),
+        role: 'designer',
         scheduledHoursPerWeek: 36,
         scheduleType: 'standard',
         isActive: true,
@@ -98,7 +92,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setPreviewDesigner(null);
   }, []);
 
-  const role = profile ? (profile.role ?? deriveRole(profile.email)) : null;
+  const role = profile ? (profile.role ?? 'designer') : null;
   const effectiveRole: UserRole | null = previewDesigner ? 'designer' : role;
   const effectiveUser: Profile | null = previewDesigner ?? profile;
 

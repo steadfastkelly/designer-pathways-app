@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSyncVersion } from '../contexts/SyncContext';
 import {
   getAllProfiles, getAllMonthlyHours, getClickupDeadlines,
   getAllReviewRecords, getBonusRecords, getPipRecords,
@@ -22,6 +23,7 @@ interface TodayData {
 }
 
 export function useTodayData(): TodayData {
+  const syncVersion = useSyncVersion();
   const [data, setData] = useState<Omit<TodayData, 'loading' | 'error' | 'refetch'>>({
     designers: [],
     monthlyHours: [],
@@ -67,7 +69,7 @@ export function useTodayData(): TodayData {
         comingUp: getComingUp(designers, safeReviews, safeBonuses, safePips),
       });
     }).catch(e => setError(e.message)).finally(() => setLoading(false));
-  }, [tick]);
+  }, [tick, syncVersion]);
 
   return { ...data, loading, error, refetch: () => setTick(t => t + 1) };
 }

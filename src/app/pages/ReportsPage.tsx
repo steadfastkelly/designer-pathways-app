@@ -74,7 +74,8 @@ export function ReportsPage() {
       {/* Detailed Table */}
       <div className="card">
         <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>Designer Summary</div>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 420 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)' }}>
               {['Designer', 'Level', 'Billable %', 'Billable Hrs', 'Status'].map(h => (
@@ -103,6 +104,7 @@ export function ReportsPage() {
             })}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

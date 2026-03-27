@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Users, Clock, CheckSquare, ExternalLink, Save, RefreshCw, CheckCircle, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { useTeamData } from '../hooks/useTeamData';
+import { useBumpSyncVersion } from '../contexts/SyncContext';
 import { Link } from 'react-router-dom';
 import { Avatar } from '../components/team/DesignerCard';
 import { PATHWAY_LEVEL_LABELS } from '../types';
@@ -71,6 +72,7 @@ export function SettingsPage() {
 // ─── Profiles Tab ──────────────────────────────────────────────────────────────
 
 function ProfilesTab({ members, loading }: { members: ReturnType<typeof useTeamData>['members']; loading: boolean }) {
+  const bumpSyncVersion = useBumpSyncVersion();
   const [seeding, setSeeding] = useState(false);
   const [seedResult, setSeedResult] = useState<{ seeded: string[]; errors: string[] } | null>(null);
 
@@ -90,7 +92,7 @@ function ProfilesTab({ members, loading }: { members: ReturnType<typeof useTeamD
         throw new Error(`Non-JSON response from /api/seed-users (HTTP ${res.status}): ${text.slice(0, 300)}`);
       }
       setSeedResult(data);
-      if (data.seeded?.length > 0) window.location.reload();
+      if (data.seeded?.length > 0) bumpSyncVersion();
     } catch (e) {
       setSeedResult({ seeded: [], errors: [`Seed failed: ${e instanceof Error ? e.message : String(e)}`] });
     }
@@ -197,6 +199,7 @@ function CredentialField({
 const TIMELY_REDIRECT_URI = `${window.location.origin}/settings`;
 
 function TimelyTab() {
+  const bumpSyncVersion = useBumpSyncVersion();
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [accountId, setAccountId] = useState('');
@@ -333,8 +336,11 @@ function TimelyTab() {
     const result = await syncTimelyData(accessToken, accountId);
     setSyncResult(result);
     setSyncing(false);
-    if (result.errors.length === 0) setLastSync(new Date().toISOString());
-  }, [accessToken, accountId]);
+    if (result.errors.length === 0) {
+      setLastSync(new Date().toISOString());
+      bumpSyncVersion();
+    }
+  }, [accessToken, accountId, bumpSyncVersion]);
 
   const handleDisconnect = async () => {
     setAccessToken('');
@@ -529,6 +535,7 @@ function TimelyTab() {
 // ─── ClickUp Tab ───────────────────────────────────────────────────────────────
 
 function ClickUpTab() {
+  const bumpSyncVersion = useBumpSyncVersion();
   const [apiKey, setApiKey] = useState('');
   const [teamId, setTeamId] = useState('');
   const [lastSync, setLastSync] = useState<string | null>(null);
@@ -575,8 +582,9 @@ function ClickUpTab() {
     setSyncing(false);
     if (result.errors.length === 0) {
       setLastSync(new Date().toISOString());
+      bumpSyncVersion();
     }
-  }, [apiKey, teamId]);
+  }, [apiKey, teamId, bumpSyncVersion]);
 
   const handleTest = async () => {
     setTesting(true);

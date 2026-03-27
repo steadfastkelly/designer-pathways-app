@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSyncVersion } from '../contexts/SyncContext';
 import { getAllProfiles, getAllMonthlyHours, getClickupDeadlines } from '../lib/api';
 import { getDesignerScore } from '../lib/scoring';
 import type { Profile, MonthlyHoursSummary, ClickupDeadline, DesignerScore } from '../types';
@@ -18,6 +19,7 @@ interface TeamData {
 }
 
 export function useTeamData(): TeamData {
+  const syncVersion = useSyncVersion();
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +38,7 @@ export function useTeamData(): TeamData {
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
-  }, [tick]);
+  }, [tick, syncVersion]);
 
   return { members, loading, error, refetch: () => setTick(t => t + 1) };
 }

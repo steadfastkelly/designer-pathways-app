@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSyncVersion } from '../contexts/SyncContext';
 import {
   getProfile, getMonthlyHours, getCoachingNotes, getClickupDeadlines,
   getReflectionEntries, getValueMultipliers, getReviewRecords,
@@ -28,6 +29,7 @@ interface ProfileData {
 }
 
 export function useProfileData(designerId: string | undefined): ProfileData {
+  const syncVersion = useSyncVersion();
   const [state, setState] = useState<Omit<ProfileData, 'loading' | 'error' | 'refetch'>>({
     profile: null, monthlyHours: [], coachingNotes: [], deadlines: [],
     reflections: [], valueMultipliers: [], reviews: [], goals: [],
@@ -57,7 +59,7 @@ export function useProfileData(designerId: string | undefined): ProfileData {
       setState({ profile, monthlyHours, coachingNotes, deadlines, reflections,
                  valueMultipliers, reviews, goals, compensationHistory, bonuses, pips });
     }).catch(e => setError(e.message)).finally(() => setLoading(false));
-  }, [designerId, tick]);
+  }, [designerId, tick, syncVersion]);
 
   return { ...state, loading, error, refetch: () => setTick(t => t + 1) };
 }

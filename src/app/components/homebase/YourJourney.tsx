@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { Profile, PerformanceGoal, ReviewRecord } from '../../types';
 import { PATHWAY_LEVEL_LABELS, PATHWAY_LEVEL_ORDER, PATHWAY_TRACK_LABELS } from '../../types';
 
@@ -8,6 +9,7 @@ interface Props {
 }
 
 export function YourJourney({ profile, goals, reviews }: Props) {
+  const [showAllGoals, setShowAllGoals] = useState(false);
   const levelIndex = profile.pathwayLevel ? PATHWAY_LEVEL_ORDER.indexOf(profile.pathwayLevel) : -1;
   const nextLevel = levelIndex >= 0 && levelIndex < PATHWAY_LEVEL_ORDER.length - 1
     ? PATHWAY_LEVEL_ORDER[levelIndex + 1]
@@ -63,13 +65,21 @@ export function YourJourney({ profile, goals, reviews }: Props) {
         <div>
           <div style={{ fontSize: 11, color: 'var(--text-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Active Goals</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {activeGoals.slice(0, 3).map(goal => (
+            {(showAllGoals ? activeGoals : activeGoals.slice(0, 3)).map(goal => (
               <div key={goal.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '10px 12px', background: 'var(--bg-surface)', borderRadius: 8 }}>
                 <div style={{ width: 6, height: 6, borderRadius: '50%', background: goal.status === 'in_progress' ? 'var(--accent-teal)' : 'var(--border-accent)', flexShrink: 0, marginTop: 4 }} />
                 <span style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.5 }}>{goal.description}</span>
               </div>
             ))}
           </div>
+          {activeGoals.length > 3 && (
+            <button
+              onClick={() => setShowAllGoals(s => !s)}
+              style={{ marginTop: 8, background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--accent-teal)', padding: 0 }}
+            >
+              {showAllGoals ? 'Show fewer' : `View all ${activeGoals.length} goals →`}
+            </button>
+          )}
         </div>
       )}
 

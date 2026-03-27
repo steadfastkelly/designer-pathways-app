@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { ShieldAlert, Plus } from 'lucide-react';
-import type { CompensationHistory, BonusRecord, Profile } from '../../types';
+import type { CompensationHistory, BonusRecord, MonthlyHoursSummary, Profile } from '../../types';
 import { computeROIMetrics } from '../../lib/compensation';
 import { addCompensationRecord } from '../../lib/api';
 
@@ -9,6 +9,7 @@ interface Props {
   profile: Profile;
   compensationHistory: CompensationHistory[];
   bonuses: BonusRecord[];
+  monthlyHours: MonthlyHoursSummary[];
   onHistoryUpdated: (record: CompensationHistory) => void;
 }
 
@@ -27,7 +28,7 @@ function MetricRow({ label, value, note }: { label: string; value: string; note?
   );
 }
 
-export function CompensationTab({ profile, compensationHistory, bonuses, onHistoryUpdated }: Props) {
+export function CompensationTab({ profile, compensationHistory, bonuses, monthlyHours, onHistoryUpdated }: Props) {
   const [confirmed, setConfirmed] = useState(false);
   const [showAddRecord, setShowAddRecord] = useState(false);
   const [newSalary, setNewSalary] = useState('');
@@ -35,8 +36,7 @@ export function CompensationTab({ profile, compensationHistory, bonuses, onHisto
   const [newNotes, setNewNotes] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Compute mock monthly billable hours from profile context
-  const monthlyBillableHours = 120; // placeholder — in real app fetch from monthlyHours
+  const monthlyBillableHours = monthlyHours[0]?.billableHours ?? 0;
   const metrics = computeROIMetrics(compensationHistory, profile.scheduledHoursPerWeek, profile.region, monthlyBillableHours);
 
   const handleAddRecord = async () => {

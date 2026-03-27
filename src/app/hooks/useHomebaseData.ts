@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSyncVersion } from '../contexts/SyncContext';
 import {
   getMonthlyHours, getReflectionEntries, getValueMultipliers,
   getReviewRecords, getPerformanceGoals, getClickupDeadlines, getAllMonthlyHours,
@@ -21,6 +22,7 @@ interface HomebaseData {
 }
 
 export function useHomebaseData(designerId: string | undefined): HomebaseData {
+  const syncVersion = useSyncVersion();
   const [state, setState] = useState<Omit<HomebaseData, 'loading' | 'error'>>({
     monthlyHours: [], teamHours: [], reflections: [], valueMultipliers: [],
     reviews: [], goals: [], deadlines: [],
@@ -41,7 +43,7 @@ export function useHomebaseData(designerId: string | undefined): HomebaseData {
     ]).then(([monthlyHours, teamHours, reflections, valueMultipliers, reviews, goals, deadlines]) => {
       setState({ monthlyHours, teamHours, reflections, valueMultipliers, reviews, goals, deadlines });
     }).catch(e => setError(e.message)).finally(() => setLoading(false));
-  }, [designerId]);
+  }, [designerId, syncVersion]);
 
   return { ...state, loading, error };
 }
