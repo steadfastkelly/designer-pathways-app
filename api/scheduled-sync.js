@@ -41,6 +41,26 @@ async function getApiCreds(supabase, service) {
   return data?.credentials ?? null;
 }
 
+async function parseJsonFromResponse(res, sourceLabel) {
+  const raw = await res.text();
+  if (!raw.trim()) {
+    return {
+      ok: false,
+      error: `${sourceLabel} parse error: empty response body (HTTP ${res.status})`,
+    };
+  }
+
+  try {
+    return { ok: true, data: JSON.parse(raw) };
+  } catch (err) {
+    const payloadPreview = raw.slice(0, 200).replace(/\s+/g, ' ').trim();
+    return {
+      ok: false,
+      error: `${sourceLabel} parse error: invalid JSON (HTTP ${res.status}) payload="${payloadPreview || '<empty>'}"`,
+    };
+  }
+}
+
 // ─── Timely ──────────────────────────────────────────────────────────────────
 
 async function refreshTimelyToken(supabase, creds) {
@@ -73,18 +93,29 @@ async function syncTimely(supabase, creds) {
   let refreshed = false;
 
   while (true) {
-    const res = await safeFetch(
-      `https://api.timelyapp.com/1.1/${accountId}/events?per_page=${perPage}&page=${page}`,
-      { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } },
-    );
+    let res;
+    try {
+      res = await safeFetch(
+        `https://api.timelyapp.com/1.1/${accountId}/events?per_page=${perPage}&page=${page}`,
+        { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } },
+      );
+    } catch (err) {
+      errors.push(`Timely fetch/network error (page ${page}): ${err.message}`);
+      break;
+    }
+
     if (res.status === 401 && !refreshed) {
       const newToken = await refreshTimelyToken(supabase, creds);
       if (newToken) { token = newToken; refreshed = true; continue; }
       errors.push('Timely access token expired and refresh failed — re-connect Timely in Settings');
       break;
     }
-    if (!res.ok) { errors.push(`Timely API error: ${res.status}`); break; }
-    const data = await res.json();
+    if (!res.ok) { errors.push(`Timely HTTP error (page ${page}): ${res.status}`); break; }
+
+    const parsed = await parseJsonFromResponse(res, `Timely page ${page}`);
+    if (!parsed.ok) { errors.push(parsed.error); break; }
+
+    const data = parsed.data;
     if (!Array.isArray(data) || data.length === 0) break;
     allEvents.push(...data);
     if (data.length < perPage) break;
@@ -155,17 +186,25 @@ async function syncClickUp(supabase, apiKey, teamId) {
 
   while (hasMore) {
     let json;
+    let res;
     try {
-      const res = await safeFetch(
+      res = await safeFetch(
         `https://api.clickup.com/api/v2/team/${teamId}/task?page=${page}&include_closed=true&subtasks=true&per_page=100`,
         { headers: { Authorization: apiKey } },
       );
-      if (!res.ok) { errors.push(`ClickUp API error: ${res.status}`); break; }
-      json = await res.json();
     } catch (err) {
-      errors.push(`ClickUp fetch failed (page ${page}): ${err.message}`);
+      errors.push(`ClickUp fetch/network error (page ${page}): ${err.message}`);
       break;
     }
+
+    if (!res.ok) {
+      errors.push(`ClickUp HTTP error (page ${page}): ${res.status}`);
+      break;
+    }
+
+    const parsed = await parseJsonFromResponse(res, `ClickUp page ${page}`);
+    if (!parsed.ok) { errors.push(parsed.error); break; }
+    json = parsed.data;
 
     const tasks = json.tasks ?? [];
     // Use ClickUp's last_page signal; fall back to task count check
