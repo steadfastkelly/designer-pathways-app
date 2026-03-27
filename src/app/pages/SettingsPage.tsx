@@ -10,6 +10,7 @@ import {
   getApiCredentials, upsertApiCredentials,
   syncTimelyData, syncClickUpData,
 } from '../lib/api';
+import type { TimelySyncResult, SyncResult } from '../lib/api';
 
 type TabId = 'profiles' | 'timely' | 'clickup';
 
@@ -210,7 +211,7 @@ function TimelyTab() {
   const [syncing, setSyncing] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
-  const [syncResult, setSyncResult] = useState<{ synced: number; errors: string[] } | null>(null);
+  const [syncResult, setSyncResult] = useState<TimelySyncResult | null>(null);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
@@ -336,7 +337,7 @@ function TimelyTab() {
     const result = await syncTimelyData(accessToken, accountId);
     setSyncResult(result);
     setSyncing(false);
-    if (result.errors.length === 0) {
+    if (result.success) {
       setLastSync(new Date().toISOString());
       bumpSyncVersion();
     }
@@ -510,7 +511,7 @@ function TimelyTab() {
         )}
       </div>
 
-      {syncResult && <SyncResult result={syncResult} />}
+      {syncResult && <TimelySyncResultCard result={syncResult} />}
 
       <FeatureCard title="What This Sync Does" features={[
         'Fetches all time entries from Timely and groups by designer + month',
@@ -542,7 +543,7 @@ function ClickUpTab() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [syncResult, setSyncResult] = useState<{ synced: number; errors: string[] } | null>(null);
+  const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
@@ -700,7 +701,7 @@ function ClickUpTab() {
         )}
       </div>
 
-      {syncResult && <SyncResult result={syncResult} />}
+      {syncResult && <SyncResultCard result={syncResult} />}
 
       <FeatureCard title="What This Sync Does" features={[
         'Fetches all tasks from your ClickUp workspace with due dates',
@@ -738,7 +739,7 @@ function ConnectionBadge({ connected }: { connected: boolean }) {
   );
 }
 
-function SyncResult({ result }: { result: { synced: number; errors: string[] } }) {
+function SyncResultCard({ result }: { result: SyncResult }) {
   const success = result.errors.length === 0;
   return (
     <div style={{
@@ -752,6 +753,44 @@ function SyncResult({ result }: { result: { synced: number; errors: string[] } }
       {result.errors.length > 0 && (
         <ul style={{ margin: 0, padding: '0 0 0 16px', fontSize: 12, color: 'var(--accent-red)' }}>
           {result.errors.slice(0, 5).map((e, i) => <li key={i}>{e}</li>)}
+          {result.errors.length > 5 && <li>…and {result.errors.length - 5} more</li>}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function TimelySyncResultCard({ result }: { result: TimelySyncResult }) {
+  return (
+    <div style={{
+      padding: '14px 18px',
+      borderRadius: 10,
+      background: result.success ? 'var(--accent-green-dim)' : 'var(--accent-red-dim)',
+      border: `1px solid ${result.success ? 'var(--accent-green)' : 'var(--accent-red)'}`,
+    }}>
+      <div style={{
+        fontSize: 13,
+        fontWeight: 600,
+        color: result.success ? 'var(--accent-green)' : 'var(--accent-red)',
+        marginBottom: (result.error_count > 0 || result.warning_count > 0) ? 8 : 0,
+      }}>
+        {result.success ? '✓ Timely sync complete' : 'Timely sync finished with critical errors'}
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 6, marginBottom: (result.error_count > 0 || result.warning_count > 0) ? 8 : 0 }}>
+        <div>Attempted: {result.attempted_at ? new Date(result.attempted_at).toLocaleString() : '—'}</div>
+        <div>Synced records: {result.synced}</div>
+        <div>Critical errors: {result.error_count}</div>
+        <div>Warnings: {result.warning_count}</div>
+      </div>
+      {result.warning_count > 0 && (
+        <ul style={{ margin: '0 0 8px 0', padding: '0 0 0 16px', fontSize: 12, color: 'var(--text-secondary)' }}>
+          {result.warnings.slice(0, 5).map((w, i) => <li key={`w-${i}`}>{w}</li>)}
+          {result.warnings.length > 5 && <li>…and {result.warnings.length - 5} more warning(s)</li>}
+        </ul>
+      )}
+      {result.error_count > 0 && (
+        <ul style={{ margin: 0, padding: '0 0 0 16px', fontSize: 12, color: 'var(--accent-red)' }}>
+          {result.errors.slice(0, 5).map((e, i) => <li key={`e-${i}`}>{e}</li>)}
           {result.errors.length > 5 && <li>…and {result.errors.length - 5} more</li>}
         </ul>
       )}
