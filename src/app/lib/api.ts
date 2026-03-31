@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { getJsonApiErrorMessage, readJsonSafely } from './http';
 import {
   mapProfile, mapMonthlyHours, mapClickupDeadline, mapCoachingNote,
   mapReflectionEntry, mapValueMultiplier, mapReviewRecord, mapPerformanceGoal,
@@ -400,20 +401,25 @@ export async function syncTimelyData(
   _token: string,
   _accountId: string,
 ): Promise<TimelySyncResult> {
+  void _token;
+  void _accountId;
   try {
     const res = await fetch('/api/scheduled-sync', { method: 'POST' });
-    const text = await res.text();
-    if (!text.trim()) {
-      return { synced: 0, errors: [`Empty response from /api/scheduled-sync (HTTP ${res.status}). Check SUPABASE_SERVICE_ROLE_KEY is set in Vercel for all environments.`] };
+    const parsed = await readJsonSafely<{
+      timely?: { synced?: number; errors?: string[] };
+      errors?: string[];
+      error?: string;
+      message?: string;
+    }>(res);
+    if (parsed.parseError) {
+      return {
+        synced: 0,
+        errors: [`${getJsonApiErrorMessage(parsed)} Check SUPABASE_SERVICE_ROLE_KEY is set in Vercel for all environments.`],
+      };
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let json: any;
-    try { json = JSON.parse(text); } catch {
-      return { synced: 0, errors: [`Non-JSON from /api/scheduled-sync: ${text.slice(0, 200)}`] };
-    }
-    if (!res.ok) return { synced: 0, errors: [json?.error ?? `Sync server error: ${res.status}`] };
-    const t = json.timely;
-    return { synced: t?.synced ?? 0, errors: [...(t?.errors ?? []), ...(json.errors ?? [])] };
+    if (!res.ok) return { synced: 0, errors: [getJsonApiErrorMessage(parsed)] };
+    const t = parsed.data?.timely;
+    return { synced: t?.synced ?? 0, errors: [...(t?.errors ?? []), ...(parsed.data?.errors ?? [])] };
   } catch (e) {
     return { synced: 0, errors: [`Sync failed: ${e instanceof Error ? e.message : String(e)}`] };
   }
@@ -426,20 +432,25 @@ export async function syncClickUpData(
   _apiKey: string,
   _teamId: string,
 ): Promise<TimelySyncResult> {
+  void _apiKey;
+  void _teamId;
   try {
     const res = await fetch('/api/scheduled-sync', { method: 'POST' });
-    const text = await res.text();
-    if (!text.trim()) {
-      return { synced: 0, errors: [`Empty response from /api/scheduled-sync (HTTP ${res.status}). Check SUPABASE_SERVICE_ROLE_KEY is set in Vercel for all environments.`] };
+    const parsed = await readJsonSafely<{
+      clickup?: { synced?: number; errors?: string[] };
+      errors?: string[];
+      error?: string;
+      message?: string;
+    }>(res);
+    if (parsed.parseError) {
+      return {
+        synced: 0,
+        errors: [`${getJsonApiErrorMessage(parsed)} Check SUPABASE_SERVICE_ROLE_KEY is set in Vercel for all environments.`],
+      };
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let json: any;
-    try { json = JSON.parse(text); } catch {
-      return { synced: 0, errors: [`Non-JSON from /api/scheduled-sync: ${text.slice(0, 200)}`] };
-    }
-    if (!res.ok) return { synced: 0, errors: [json?.error ?? `Sync server error: ${res.status}`] };
-    const c = json.clickup;
-    return { synced: c?.synced ?? 0, errors: [...(c?.errors ?? []), ...(json.errors ?? [])] };
+    if (!res.ok) return { synced: 0, errors: [getJsonApiErrorMessage(parsed)] };
+    const c = parsed.data?.clickup;
+    return { synced: c?.synced ?? 0, errors: [...(c?.errors ?? []), ...(parsed.data?.errors ?? [])] };
   } catch (e) {
     return { synced: 0, errors: [`Sync failed: ${e instanceof Error ? e.message : String(e)}`] };
   }
