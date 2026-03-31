@@ -125,41 +125,163 @@ async function syncTimely(supabase, creds) {
 
   if (errors.length) return { synced, errors };
 
-  const { data: profiles } = await supabase.from('profiles').select('id, email');
-  const emailToId = {};
-  for (const p of (profiles ?? [])) emailToId[p.email.toLowerCase()] = p.id;
+  const diagnostics = {
+    totalEventsFetched: allEvents.length,
+    matchedEvents: 0,
+    unmatchedEvents: {
+      total: 0,
+      byReason: {
+        missingIdentity: 0,
+        unknownUser: 0,
+        badDate: 0,
+      },
+    },
+  };
+
+  const normalizeEmail = (value) => {
+    if (!value || typeof value !== 'string') return null;
+    const normalized = value.trim().toLowerCase();
+    return normalized || null;
+  };
+
+  const normalizeTimelyUserId = (value) => {
+    if (value === null || value === undefined) return null;
+    const normalized = String(value).trim().toLowerCase();
+    return normalized || null;
+  };
+
+  const upsertIdSet = (map, key, designerId) => {
+    if (!key || !designerId) return;
+    map[key] = designerId;
+  };
+
+  const addPotentialTimelyIds = (bucket, candidate) => {
+    if (candidate === null || candidate === undefined) return;
+    if (Array.isArray(candidate)) {
+      for (const item of candidate) addPotentialTimelyIds(bucket, item);
+      return;
+    }
+    const normalized = normalizeTimelyUserId(candidate);
+    if (normalized) bucket.add(normalized);
+  };
+
+  const { data: profiles, error: profilesError } = await supabase
+    .from('profiles')
+    .select('id, email, timely_user_id, timely_user_ids, external_ids');
+
+  let profileRows = profiles;
+  if (profilesError) {
+    // Backward compatibility with schemas that don't yet include optional Timely identity fields.
+    const { data: fallbackProfiles, error: fallbackProfilesError } = await supabase
+      .from('profiles')
+      .select('id, email');
+    if (fallbackProfilesError) throw new Error(`Failed to fetch profiles: ${fallbackProfilesError.message}`);
+    profileRows = fallbackProfiles;
+  }
+
+  const emailToDesignerId = {};
+  const timelyUserIdToDesignerId = {};
+
+  for (const p of (profileRows ?? [])) {
+    const email = normalizeEmail(p.email);
+    if (email) emailToDesignerId[email] = p.id;
+
+    const potentialIds = new Set();
+    addPotentialTimelyIds(potentialIds, p.timely_user_id);
+    addPotentialTimelyIds(potentialIds, p.timely_user_ids);
+    addPotentialTimelyIds(potentialIds, p.external_ids?.timely?.user_id);
+    addPotentialTimelyIds(potentialIds, p.external_ids?.timely?.user_ids);
+
+    for (const timelyUserId of potentialIds) upsertIdSet(timelyUserIdToDesignerId, timelyUserId, p.id);
+  }
+
+  // Optional mapping table support: ignore missing-table errors for deployments that do not have it yet.
+  const { data: timelyMappings, error: timelyMappingsError } = await supabase
+    .from('timely_user_mappings')
+    .select('profile_id, timely_user_id');
+  if (!timelyMappingsError && Array.isArray(timelyMappings)) {
+    for (const mapping of timelyMappings) {
+      upsertIdSet(timelyUserIdToDesignerId, normalizeTimelyUserId(mapping.timely_user_id), mapping.profile_id);
+    }
+  }
+
+  const extractTimelyIdentity = (event) => {
+    const emailCandidates = [
+      event?.user?.email,
+      event?.email,
+      event?.user_email,
+      event?.person?.email,
+      event?.owner?.email,
+    ];
+    const timelyUserIdCandidates = [
+      event?.user_id,
+      event?.user?.id,
+      event?.user?.user_id,
+      event?.person_id,
+      event?.person?.id,
+      event?.owner_id,
+      event?.owner?.id,
+    ];
+
+    const email = emailCandidates.map(normalizeEmail).find(Boolean) ?? null;
+    const timelyUserId = timelyUserIdCandidates.map(normalizeTimelyUserId).find(Boolean) ?? null;
+    return { email, timelyUserId };
+  };
 
   const grouped = {};
   for (const event of allEvents) {
-    const email = event.user?.email?.toLowerCase();
-    if (!email) continue;
+    const { email, timelyUserId } = extractTimelyIdentity(event);
+    if (!email && !timelyUserId) {
+      diagnostics.unmatchedEvents.total++;
+      diagnostics.unmatchedEvents.byReason.missingIdentity++;
+      continue;
+    }
+
+    const designerId = (email ? emailToDesignerId[email] : null) || (timelyUserId ? timelyUserIdToDesignerId[timelyUserId] : null);
+    if (!designerId) {
+      diagnostics.unmatchedEvents.total++;
+      diagnostics.unmatchedEvents.byReason.unknownUser++;
+      continue;
+    }
+
     const date = new Date(event.day);
-    if (isNaN(date.getTime())) continue;
+    if (isNaN(date.getTime())) {
+      diagnostics.unmatchedEvents.total++;
+      diagnostics.unmatchedEvents.byReason.badDate++;
+      continue;
+    }
+
+    diagnostics.matchedEvents++;
     const year = date.getFullYear();
     const month = date.getMonth() + 1;
-    const key = `${email}-${year}-${month}`;
+    const key = `${designerId}-${year}-${month}`;
     const hours = (event.duration?.hours ?? 0) + (event.duration?.minutes ?? 0) / 60;
     const billable = event.billed === true || event.billable === true;
-    if (!grouped[key]) grouped[key] = { email, year, month, totalHours: 0, billableHours: 0, internalHours: 0 };
+    if (!grouped[key]) grouped[key] = { designerId, identity: email || timelyUserId || 'unknown', year, month, totalHours: 0, billableHours: 0, internalHours: 0 };
     grouped[key].totalHours += hours;
     if (billable) grouped[key].billableHours += hours;
     else grouped[key].internalHours += hours;
   }
 
   for (const entry of Object.values(grouped)) {
-    const designerId = emailToId[entry.email];
-    if (!designerId) continue;
     const billablePercent = entry.totalHours > 0 ? Math.round((entry.billableHours / entry.totalHours) * 100) : 0;
     const { error } = await supabase.from('monthly_hours_summary').upsert({
-      designer_id: designerId, year: entry.year, month: entry.month,
+      designer_id: entry.designerId, year: entry.year, month: entry.month,
       total_hours: Math.round(entry.totalHours * 100) / 100,
       billable_hours: Math.round(entry.billableHours * 100) / 100,
       internal_hours: Math.round(entry.internalHours * 100) / 100,
       billable_percent: billablePercent, logging_days: 0, internal_breakdown: {},
       updated_at: new Date().toISOString(),
     }, { onConflict: 'designer_id,year,month' });
-    if (error) errors.push(`Upsert ${entry.email}: ${error.message}`);
+    if (error) errors.push(`Upsert ${entry.identity}: ${error.message}`);
     else synced++;
+  }
+
+  if (diagnostics.unmatchedEvents.total > 0) {
+    const { missingIdentity, unknownUser, badDate } = diagnostics.unmatchedEvents.byReason;
+    errors.push(
+      `Unmatched Timely events: ${diagnostics.unmatchedEvents.total} (missing identity: ${missingIdentity}, unknown user: ${unknownUser}, bad date: ${badDate})`,
+    );
   }
 
   await supabase.from('app_settings').upsert(
@@ -167,7 +289,7 @@ async function syncTimely(supabase, creds) {
     { onConflict: 'key' },
   );
 
-  return { synced, errors };
+  return { synced, errors, diagnostics };
 }
 
 // ─── ClickUp ─────────────────────────────────────────────────────────────────
